@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-....'
+SECRET_KEY = 'SECRET_KEY'
 ```
 
 4. Осуществите команды для создания миграций приложения с БД:
@@ -142,11 +142,19 @@ README.md
   - explanation - объяснение к правильному ответу
 
 
+# Видеодемонстрация чат-бота ТГ
+<video width="320" height="240" controls>
+  <source src="URL_ВИДЕО_MP4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+
 # Команды чат-бота Telegram
 - ```/start```: запуск чат-бота
 - ```/register```: регистрация пользователя
 - ```/login```: вход пользователя в приложение
 - ```/logout```: выход пользователя из приложения
+- ```/main_menu```: выход в главное меню
 
 
 - ```/start_quiz```: запуск викторины для участника

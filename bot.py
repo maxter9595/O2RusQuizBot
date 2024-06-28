@@ -27,17 +27,51 @@ def start(message):
     """
     Запускает бота для регистрации и авторизации пользователей
     """
-    bot.reply_to(
-        message=message,
-        text="""
-        Добро пожаловать! 
-        Для регистрации введите /register
-        Для авторизации введите /login
-        """
-    )
+    markup_start = True
+    user_auth = Authorization.objects.filter(telegram_id=message.from_user.id)
+
+    if user_auth.exists():
+        user_id = user_auth.first().id
+        custom_user = CustomUser.objects.filter(id=user_id)
+
+        if custom_user.exists():
+            if custom_user.first().is_authorized:
+                bot.send_message(
+                    chat_id=message.chat.id,
+                    text='Вы уже авторизованы',
+                )
+                markup_start = False
+
+    if markup_start:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login
+        )
+
+        bot.reply_to(
+            message=message,
+            text='\n'.join([
+                'Добро пожаловать!',
+                '📝 Для регистрации введите /register',
+                '🔒 Для авторизации введите /login',
+            ]),
+            reply_markup=markup,
+        )
 
 
-@bot.message_handler(commands=['register'])
+@bot.message_handler(func=lambda message: "Регистрация" in message.text or message.text == "/register")
 def register(message):
     """
     Проверяет зарегистрирован ли пользователь. Если нет, то начинает серию вопросов
@@ -155,13 +189,12 @@ def process_password_registration(message, full_name, date_of_birth, phone_numbe
         )
 
 
-@bot.message_handler(commands=['login'])
+@bot.message_handler(func=lambda message: "Авторизация" in message.text or message.text == "/login")
 def login(message):
     """
     Начинает процесс авторизации пользователя
     """
     uid = message.from_user.id
-
     auth_data = Authorization.objects.filter(
         telegram_id=str(uid)
     )
@@ -217,10 +250,9 @@ def process_password(message, custom_user):
         custom_user.last_login = timezone.now()
         custom_user.is_authorized = True
         custom_user.save()
-        bot.reply_to(
-            message,
-            "Успешная авторизация. Добро пожаловать! Для выхода необходимо ввести /logout"
-        )
+
+        main_menu(message)
+
     else:
         bot.reply_to(
             message,
@@ -228,7 +260,101 @@ def process_password(message, custom_user):
         )
 
 
-@bot.message_handler(commands=['logout'])
+@bot.message_handler(func=lambda message: "Главное меню" in message.text or message.text == "/main_menu")
+def main_menu(message):
+    """
+    Отображает главное меню пользователя
+    """
+    uid = message.from_user.id
+    auth_data = Authorization.objects.filter(
+        telegram_id=str(uid)
+    )
+
+    if not auth_data.exists():
+        bot.reply_to(
+            message=message,
+            text="Вы не зарегистрированы. Для регистрации введите /register"
+        )
+
+    else:
+        auth_obj = auth_data.first()
+        custom_user = CustomUser.objects.filter(
+            username_id=auth_obj.id
+        ).first()
+
+        if not custom_user.is_authorized:
+            bot.reply_to(
+                message,
+                "Вы не авторизованы."
+            )
+
+        else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_logout = types.KeyboardButton(
+                text='Выход'
+            )
+
+            btn_start_quiz = types.KeyboardButton(
+                text='Начать викторину'
+            )
+
+            btn_add_points = types.KeyboardButton(
+                text='Добавить очки участнику'
+            )
+
+            btn_tournament_rating = types.KeyboardButton(
+                text='Общий рейтинг по баллам'
+            )
+
+            btn_participant_rating = types.KeyboardButton(
+                text='Мое место в рейтинге по баллам'
+            )
+
+            btn_answers_rating = types.KeyboardButton(
+                text='Общий рейтинг по верным ответам'
+            )
+
+            btn_tour_statistics = types.KeyboardButton(
+                text='Общий рейтинг тура по баллам'
+            )
+
+            btn_tours_statistics = types.KeyboardButton(
+                text='Общий рейтинг по всем турам'
+            )
+
+            if custom_user.role_id == 2:
+                markup.add(
+                    btn_logout,
+                    btn_add_points,
+                    btn_tournament_rating,
+                    btn_participant_rating,
+                    btn_answers_rating,
+                    btn_tour_statistics,
+                    btn_tours_statistics
+                )
+
+            else:
+                markup.add(
+                    btn_logout,
+                    btn_start_quiz,
+                    btn_tournament_rating,
+                    btn_participant_rating,
+                    btn_answers_rating,
+                    btn_tour_statistics,
+                    btn_tours_statistics
+                )
+
+            bot.reply_to(
+                message,
+                "Главное меню",
+                reply_markup=markup,
+            )
+
+
+@bot.message_handler(func=lambda message: 'Выход' in message.text or message.text == '/logout')
 def logout(message):
     """
     Осуществляет выход пользователя из приложения, если он авторизован
@@ -248,9 +374,27 @@ def logout(message):
             custom_user.is_authorized = False
             custom_user.save()
 
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+            )
+
             bot.reply_to(
                 message,
-                "Вы успешно вышли из аккаунта."
+                "Вы успешно вышли из аккаунта.",
+                reply_markup=markup,
             )
 
         else:
@@ -266,7 +410,7 @@ def logout(message):
         )
 
 
-@bot.message_handler(commands=['add_points'])
+@bot.message_handler(func=lambda message: 'Добавить очки участнику' in message.text or message.text == '/add_points')
 def add_points_check(message):
     """
     Проверяет, является ли пользователь директором. Если директор, то запрашивает тип начисления баллов участнику
@@ -286,17 +430,35 @@ def add_points_check(message):
             user_auth_data = user_auth_data.first()
 
             if user_auth_data.role_id == 2:
-                text = """
-                Введдите тип начисления баллов в виде числа: 
-                1 - порядковый номер занятого места с шагом 5 баллов, 
-                2 - РОТ (ПОТ) [указываем общую цифру, делим на /50 и зачисляем полученные баллы],
-                3 - произвольная цифра (бонусы),
-                4 - перевод баллов между участниками
-                """
+                markup = types.ReplyKeyboardMarkup(
+                    resize_keyboard=True
+                )
+
+                btn_main_menu = types.KeyboardButton(
+                    text='Главное меню'
+                )
+
+                btn_logout = types.KeyboardButton(
+                    text='Выход'
+                )
+
+                markup.add(
+                    btn_main_menu,
+                    btn_logout
+                )
+
+                text = '\n'.join([
+                    'Введдите тип начисления баллов в виде числа:',
+                    '1 - порядковый номер занятого места с шагом 5 баллов',
+                    '2 - РОТ (ПОТ) [указываем общую цифру, делим на /50 и зачисляем полученные баллы]',
+                    '3 - произвольная цифра (бонусы)',
+                    '4 - перевод баллов между участниками'
+                ])
 
                 response = bot.reply_to(
                     message,
-                    text
+                    text,
+                    reply_markup=markup,
                 )
 
                 bot.register_next_step_handler(
@@ -331,17 +493,24 @@ def process_add_tour(message, **kwargs):
     uid = kwargs.get('uid')
     points_type = message.text
 
-    reply = bot.reply_to(
-        message,
-        "Введите номер тура:"
-    )
+    if points_type == "Главное меню":
+        main_menu(message)
 
-    bot.register_next_step_handler(
-        reply,
-        process_add_question_number,
-        uid=uid,
-        points_type=points_type
-    )
+    elif points_type == "Выход":
+        logout(message)
+
+    else:
+        reply = bot.reply_to(
+            message,
+            "Введите номер тура:"
+        )
+
+        bot.register_next_step_handler(
+            reply,
+            process_add_question_number,
+            uid=uid,
+            points_type=points_type
+        )
 
 
 def process_add_question_number(message, **kwargs):
@@ -352,32 +521,39 @@ def process_add_question_number(message, **kwargs):
     uid = kwargs.get('uid')
     tour = message.text
 
-    if tour.isdigit():
-        if int(tour) > 0:
-            reply = bot.reply_to(
-                message,
-                "Введите номер вопроса:"
-            )
+    if tour == "Главное меню":
+        main_menu(message)
 
-            bot.register_next_step_handler(
-                reply,
-                process_add_points_type,
-                uid=uid,
-                tour=tour,
-                points_type=points_type
-            )
+    elif tour == "Выход":
+        logout(message)
+
+    else:
+        if tour.isdigit():
+            if int(tour) > 0:
+                reply = bot.reply_to(
+                    message,
+                    "Введите номер вопроса:"
+                )
+
+                bot.register_next_step_handler(
+                    reply,
+                    process_add_points_type,
+                    uid=uid,
+                    tour=tour,
+                    points_type=points_type
+                )
+
+            else:
+                bot.reply_to(
+                    message,
+                    "Некорректный ввод номера тура (число должно быть больше нуля)"
+                )
 
         else:
             bot.reply_to(
                 message,
-                "Некорректный ввод номера тура (число должно быть больше нуля)"
+                "Некорректный ввод номера тура (должно быть число)"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "Некорректный ввод номера тура (должно быть число)"
-        )
 
 
 def process_add_points_type(message, **kwargs):
@@ -389,121 +565,128 @@ def process_add_points_type(message, **kwargs):
     tour = kwargs.get('tour')
     question_number = message.text
 
-    if question_number.isdigit():
-        if int(question_number) > 0:
-            if add_points_type in ('1', '2', '3', '4'):
-                participants = Authorization.objects.all().filter(
-                    role=3
-                )
+    if question_number == "Главное меню":
+        main_menu(message)
 
-                participants_list = []
-                if participants:
-                    for participant in participants:
-                        part_id = participant.id
-                        part_name = participant.full_name
-                        part_nick = participant.telegram_nickname
-                        part_tel_id = participant.telegram_id
+    elif question_number == "Выход":
+        logout(message)
 
-                        participants_list.append(
-                            f"{part_id}: {part_name}" + f" (Telegram: {part_nick}, {part_tel_id})"
-                        )
-
-                    total_participants = len(participants_list)
-                    participants_list = "\n".join(participants_list)
-
-                    bot.reply_to(
-                        message,
-                        f"Список участников: \n{participants_list}"
+    else:
+        if question_number.isdigit():
+            if int(question_number) > 0:
+                if add_points_type in ('1', '2', '3', '4'):
+                    participants = Authorization.objects.all().filter(
+                        role=3
                     )
 
-                    if len(participants_list) >= 1:
-                        if add_points_type == '1':
-                            response = bot.reply_to(
-                                message,
-                                f"Выберите по ID участника, которому будем ставить место в рейтинге:"
+                    participants_list = []
+                    if participants:
+                        for participant in participants:
+                            part_id = participant.id
+                            part_name = participant.full_name
+                            part_nick = participant.telegram_nickname
+                            part_tel_id = participant.telegram_id
+
+                            participants_list.append(
+                                f"{part_id}: {part_name}" + f" (Telegram: {part_nick}, {part_tel_id})"
                             )
 
-                            bot.register_next_step_handler(
-                                response,
-                                process_points_type_1_place,
-                                tour=tour,
-                                question_number=question_number,
-                                uid=uid,
-                                total_participants=total_participants,
-                            )
+                        total_participants = len(participants_list)
+                        participants_list = "\n".join(participants_list)
 
-                        elif add_points_type == '2':
-                            response = bot.reply_to(
-                                message,
-                                "Выберите по ID участника, которому назначаем баллы"
-                            )
+                        bot.reply_to(
+                            message,
+                            f"Список участников: \n{participants_list}"
+                        )
 
-                            bot.register_next_step_handler(
-                                response,
-                                process_points_type_2_digit,
-                                tour=tour,
-                                question_number=question_number,
-                                uid=uid,
-                            )
-
-                        elif add_points_type == '3':
-                            response = bot.reply_to(
-                                message,
-                                f"Выберите по ID участника, которому назначаем баллы:"
-                            )
-
-                            bot.register_next_step_handler(
-                                response,
-                                process_points_type_3_bonuses,
-                                tour=tour,
-                                question_number=question_number,
-                                uid=uid,
-                            )
-
-                        elif add_points_type == '4':
-                            if len(participants_list) >= 2:
+                        if len(participants_list) >= 1:
+                            if add_points_type == '1':
                                 response = bot.reply_to(
                                     message,
-                                    f"Выберите участника, у которого забираем баллы по его ID в БД:"
+                                    f"Выберите по ID участника, которому будем ставить место в рейтинге:"
                                 )
 
                                 bot.register_next_step_handler(
                                     response,
-                                    process_points_type_4_receiver,
+                                    process_points_type_1_place,
+                                    tour=tour,
+                                    question_number=question_number,
+                                    uid=uid,
+                                    total_participants=total_participants,
+                                )
+
+                            elif add_points_type == '2':
+                                response = bot.reply_to(
+                                    message,
+                                    "Выберите по ID участника, которому назначаем баллы"
+                                )
+
+                                bot.register_next_step_handler(
+                                    response,
+                                    process_points_type_2_digit,
                                     tour=tour,
                                     question_number=question_number,
                                     uid=uid,
                                 )
 
-                            else:
-                                bot.reply_to(
+                            elif add_points_type == '3':
+                                response = bot.reply_to(
                                     message,
-                                    "Недостаточное количество участников для начисления баллов"
+                                    f"Выберите по ID участника, которому назначаем баллы:"
                                 )
+
+                                bot.register_next_step_handler(
+                                    response,
+                                    process_points_type_3_bonuses,
+                                    tour=tour,
+                                    question_number=question_number,
+                                    uid=uid,
+                                )
+
+                            elif add_points_type == '4':
+                                if len(participants_list) >= 2:
+                                    response = bot.reply_to(
+                                        message,
+                                        f"Выберите участника, у которого забираем баллы по его ID в БД:"
+                                    )
+
+                                    bot.register_next_step_handler(
+                                        response,
+                                        process_points_type_4_receiver,
+                                        tour=tour,
+                                        question_number=question_number,
+                                        uid=uid,
+                                    )
+
+                                else:
+                                    bot.reply_to(
+                                        message,
+                                        "Недостаточное количество участников для начисления баллов"
+                                    )
+
+                    else:
+                        bot.reply_to(
+                            message,
+                            "У вас отсутствуют участники"
+                        )
 
                 else:
                     bot.reply_to(
                         message,
-                        "У вас отсутствуют участники"
+                        "Некорректный тип начисления баллов. Пожалуйста, выберите один из предложенных вариантов"
                     )
 
             else:
                 bot.reply_to(
                     message,
-                    "Некорректный тип начисления баллов. Пожалуйста, выберите один из предложенных вариантов"
+                    "Некорректный ввод номера вопроса (число должно быть больше нуля)"
                 )
 
         else:
             bot.reply_to(
                 message,
-                "Некорректный ввод номера вопроса (число должно быть больше нуля)"
+                "Некорректный ввод номера вопроса (должно быть число)"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "Некорректный ввод номера вопроса (должно быть число)"
-        )
 
 
 def process_points_type_1_place(message, **kwargs):
@@ -516,51 +699,58 @@ def process_points_type_1_place(message, **kwargs):
     total_participants = kwargs.get('total_participants')
     participant_id = message.text
 
-    if participant_id.isdigit():
-        if int(participant_id) > 0:
-            participant = Authorization.objects.get(
-                id=participant_id
-            )
+    if participant_id == "Главное меню":
+        main_menu(message)
 
-            if participant:
-                text1 = 'Введите номер места в рейтинге для следующего участника:'
-                text2 = 'На текущий момент можно ввести место в диапазоне от 1 до'
-                part_name = participant.full_name
-                part_nick = participant.telegram_nickname
-                part_tel_id = participant.telegram_id
+    elif participant_id == "Выход":
+        logout(message)
 
-                response = bot.reply_to(
-                    message,
-                    f"{text1} {part_name} (Telegram: {part_nick}, {part_tel_id}). {text2} {total_participants}"
+    else:
+        if participant_id.isdigit():
+            if int(participant_id) > 0:
+                participant = Authorization.objects.get(
+                    id=participant_id
                 )
 
-                bot.register_next_step_handler(
-                    response,
-                    process_points_type_1_place_points,
-                    uid=uid,
-                    tour=tour,
-                    question_number=question_number,
-                    participant=participant,
-                    total_participants=total_participants
-                )
+                if participant:
+                    text1 = 'Введите номер места в рейтинге для следующего участника:'
+                    text2 = 'На текущий момент можно ввести место в диапазоне от 1 до'
+                    part_name = participant.full_name
+                    part_nick = participant.telegram_nickname
+                    part_tel_id = participant.telegram_id
+
+                    response = bot.reply_to(
+                        message,
+                        f"{text1} {part_name} (Telegram: {part_nick}, {part_tel_id}). {text2} {total_participants}"
+                    )
+
+                    bot.register_next_step_handler(
+                        response,
+                        process_points_type_1_place_points,
+                        uid=uid,
+                        tour=tour,
+                        question_number=question_number,
+                        participant=participant,
+                        total_participants=total_participants
+                    )
+
+                else:
+                    bot.reply_to(
+                        message,
+                        "Участника не существует в БД"
+                    )
 
             else:
                 bot.reply_to(
                     message,
-                    "Участника не существует в БД"
+                    "ID должен быть больше нуля"
                 )
 
         else:
             bot.reply_to(
                 message,
-                "ID должен быть больше нуля"
+                "ID должно быть числом"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "ID должно быть числом"
-        )
 
 
 def process_points_type_1_place_points(message, **kwargs):
@@ -586,21 +776,164 @@ def process_points_type_1_place_points(message, **kwargs):
     total_participants = kwargs.get('total_participants')
     place = message.text
 
-    if place.isdigit():
-        if int(place) > 0:
-            if int(place) <= total_participants:
-                if total_participants <= 30:
-                    points_dict = create_points_dict()
-                else:
-                    points_dict = create_points_dict(
-                        max_place=total_participants
+    if place == "Главное меню":
+        main_menu(message)
+
+    elif place == "Выход":
+        logout(message)
+
+    else:
+        if place.isdigit():
+            if int(place) > 0:
+                if int(place) <= total_participants:
+                    if total_participants <= 30:
+                        points_dict = create_points_dict()
+                    else:
+                        points_dict = create_points_dict(
+                            max_place=total_participants
+                        )
+
+                    points = calculate_points(
+                        points_dict,
+                        int(place)
                     )
 
-                points = calculate_points(
-                    points_dict,
-                    int(place)
+                    transferor = Authorization.objects.get(
+                        telegram_id=uid
+                    )
+
+                    question = Question.objects.get(
+                        tour_id=int(tour),
+                        tour_question_number_id=int(question_number)
+                    )
+
+                    if question:
+                        participant_row = PointsTransaction.objects.filter(
+                            sender_telegram_id=participant.telegram_id,
+                            transferor_telegram_id=transferor.telegram_id,
+                            question_id=question.id,
+                        )
+
+                        if not participant_row.exists():
+                            PointsTransaction.objects.create(
+                                sender_telegram_id=participant.telegram_id,
+                                transferor_telegram_id=transferor.telegram_id,
+                                question_id=question.id,
+                                tournament_points=points,
+                            )
+
+                        else:
+                            participant_row.update(
+                                tournament_points=points,
+                                points_datetime=timezone.now(),
+                            )
+
+                        bot.reply_to(
+                            message,
+                            f"Участник {participant.full_name} получил {points} баллов за {place} место в рейтине"
+                        )
+
+                    else:
+                        bot.reply_to(
+                            message,
+                            "Пара 'тур-вопрос' не существует в БД"
+                        )
+
+                else:
+                    bot.reply_to(
+                        message,
+                        f"Место в рейтинге должно быть в диапазоне от 1 до {total_participants}"
+                    )
+
+            else:
+                bot.reply_to(
+                    message,
+                    "Некорректный ввод места в рейтинге (число должно быть больше нуля)"
                 )
 
+        else:
+            bot.reply_to(
+                message,
+                "Некорректный ввод места в рейтинге (число должно быть числом)"
+            )
+
+
+def process_points_type_2_digit(message, **kwargs):
+    """
+    Запрашивает общую цифру для начисления баллов (2-й тип начисления баллов)
+    """
+    uid = kwargs.get('uid')
+    tour = kwargs.get('tour')
+    question_number = kwargs.get('question_number')
+    participant_id = message.text
+
+    if participant_id == "Главное меню":
+        main_menu(message)
+
+    elif participant_id == "Выход":
+        logout(message)
+
+    else:
+        if participant_id.isdigit():
+            if int(participant_id) > 0:
+                participant = Authorization.objects.get(
+                    id=participant_id
+                )
+
+                if participant:
+                    response = bot.reply_to(
+                        message,
+                        "Введите общую цифру для начисления баллов:"
+                    )
+
+                    bot.register_next_step_handler(
+                        response,
+                        process_points_type_2_pot,
+                        uid=uid,
+                        tour=tour,
+                        question_number=question_number,
+                        participant=participant,
+                    )
+
+                else:
+                    bot.reply_to(
+                        message,
+                        "Участника не существует в БД"
+                    )
+
+            else:
+                bot.reply_to(
+                    message,
+                    "ID должен быть больше нуля"
+                )
+
+        else:
+            bot.reply_to(
+                message,
+                "ID должно быть числом"
+            )
+
+
+def process_points_type_2_pot(message, **kwargs):
+    """
+    Делим цифру на 50 и начисляем баллы. Фиксируем баллы в таблице PointsTransaction (2-й тип начисления баллов)
+    """
+    uid = kwargs.get('uid')
+    tour = kwargs.get('tour')
+    question_number = kwargs.get('question_number')
+    participant = kwargs.get('participant')
+    digit = message.text
+
+    if digit == "Главное меню":
+        main_menu(message)
+
+    elif digit == "Выход":
+        logout(message)
+
+    else:
+        if digit.isdigit():
+            if int(digit) > 0:
+                points = int(digit) / 50
                 transferor = Authorization.objects.get(
                     telegram_id=uid
                 )
@@ -622,153 +955,31 @@ def process_points_type_1_place_points(message, **kwargs):
                             sender_telegram_id=participant.telegram_id,
                             transferor_telegram_id=transferor.telegram_id,
                             question_id=question.id,
-                            tournament_points=points,
+                            points_received_or_transferred=points,
                         )
 
                     else:
                         participant_row.update(
-                            tournament_points=points,
+                            points_received_or_transferred=points,
                             points_datetime=timezone.now(),
                         )
 
                     bot.reply_to(
                         message,
-                        f"Участник {participant.full_name} получил {points} баллов за {place} место в рейтине"
-                    )
-
-                else:
-                    bot.reply_to(
-                        message,
-                        "Пара 'тур-вопрос' не существует в БД"
+                        f"Участник {participant.full_name} получил {int(points)} баллов"
                     )
 
             else:
                 bot.reply_to(
                     message,
-                    f"Место в рейтинге должно быть в диапазоне от 1 до {total_participants}"
+                    "Некорректный ввод общей цифры (число должно быть больше нуля)"
                 )
 
         else:
             bot.reply_to(
                 message,
-                "Некорректный ввод места в рейтинге (число должно быть больше нуля)"
+                "Некорректный ввод общей цифры (нужно именно число)"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "Некорректный ввод места в рейтинге (число должно быть числом)"
-        )
-
-
-def process_points_type_2_digit(message, **kwargs):
-    """
-    Запрашивает общую цифру для начисления баллов (2-й тип начисления баллов)
-    """
-    uid = kwargs.get('uid')
-    tour = kwargs.get('tour')
-    question_number = kwargs.get('question_number')
-    participant_id = message.text
-
-    if participant_id.isdigit():
-        if int(participant_id) > 0:
-            participant = Authorization.objects.get(
-                id=participant_id
-            )
-
-            if participant:
-                response = bot.reply_to(
-                    message,
-                    "Введите общую цифру для начисления баллов:"
-                )
-
-                bot.register_next_step_handler(
-                    response,
-                    process_points_type_2_pot,
-                    uid=uid,
-                    tour=tour,
-                    question_number=question_number,
-                    participant=participant,
-                )
-
-            else:
-                bot.reply_to(
-                    message,
-                    "Участника не существует в БД"
-                )
-
-        else:
-            bot.reply_to(
-                message,
-                "ID должен быть больше нуля"
-            )
-
-    else:
-        bot.reply_to(
-            message,
-            "ID должно быть числом"
-        )
-
-
-def process_points_type_2_pot(message, **kwargs):
-    """
-    Делим цифру на 50 и начисляем баллы. Фиксируем баллы в таблице PointsTransaction (2-й тип начисления баллов)
-    """
-    uid = kwargs.get('uid')
-    tour = kwargs.get('tour')
-    question_number = kwargs.get('question_number')
-    participant = kwargs.get('participant')
-    digit = message.text
-
-    if digit.isdigit():
-        if int(digit) > 0:
-            points = int(digit) / 50
-            transferor = Authorization.objects.get(
-                telegram_id=uid
-            )
-
-            question = Question.objects.get(
-                tour_id=int(tour),
-                tour_question_number_id=int(question_number)
-            )
-
-            if question:
-                participant_row = PointsTransaction.objects.filter(
-                    sender_telegram_id=participant.telegram_id,
-                    transferor_telegram_id=transferor.telegram_id,
-                    question_id=question.id,
-                )
-
-                if not participant_row.exists():
-                    PointsTransaction.objects.create(
-                        sender_telegram_id=participant.telegram_id,
-                        transferor_telegram_id=transferor.telegram_id,
-                        question_id=question.id,
-                        points_received_or_transferred=points,
-                    )
-
-                else:
-                    participant_row.update(
-                        points_received_or_transferred=points,
-                        points_datetime=timezone.now(),
-                    )
-
-                bot.reply_to(
-                    message,
-                    f"Участник {participant.full_name} получил {int(points)} баллов"
-                )
-
-        else:
-            bot.reply_to(
-                message,
-                "Некорректный ввод общей цифры (число должно быть больше нуля)"
-            )
-
-    else:
-        bot.reply_to(
-            message,
-            "Некорректный ввод общей цифры (нужно именно число)"
-        )
 
 
 def process_points_type_3_bonuses(message, **kwargs):
@@ -780,44 +991,51 @@ def process_points_type_3_bonuses(message, **kwargs):
     question_number = kwargs.get('question_number')
     participant_id = message.text
 
-    if participant_id.isdigit():
-        if int(participant_id) > 0:
-            participant = Authorization.objects.get(
-                id=participant_id
-            )
+    if participant_id == "Главное меню":
+        main_menu(message)
 
-            if participant:
-                response = bot.reply_to(
-                    message,
-                    f"Введите размер бонуса (если хотите автоматом задать рандомное число введите 'random'):"
+    elif participant_id == "Выход":
+        logout(message)
+
+    else:
+        if participant_id.isdigit():
+            if int(participant_id) > 0:
+                participant = Authorization.objects.get(
+                    id=participant_id
                 )
 
-                bot.register_next_step_handler(
-                    response,
-                    process_points_type_3_random,
-                    uid=uid,
-                    tour=tour,
-                    question_number=question_number,
-                    participant=participant
-                )
+                if participant:
+                    response = bot.reply_to(
+                        message,
+                        f"Введите размер бонуса (если хотите автоматом задать рандомное число введите 'random'):"
+                    )
+
+                    bot.register_next_step_handler(
+                        response,
+                        process_points_type_3_random,
+                        uid=uid,
+                        tour=tour,
+                        question_number=question_number,
+                        participant=participant
+                    )
+
+                else:
+                    bot.reply_to(
+                        message,
+                        "Участника не существует в БД"
+                    )
 
             else:
                 bot.reply_to(
                     message,
-                    "Участника не существует в БД"
+                    "ID должен быть больше нуля"
                 )
 
         else:
             bot.reply_to(
                 message,
-                "ID должен быть больше нуля"
+                "ID должно быть числом"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "ID должно быть числом"
-        )
 
 
 def process_points_type_3_random(message, **kwargs):
@@ -830,47 +1048,54 @@ def process_points_type_3_random(message, **kwargs):
     participant = kwargs.get('participant')
     bonuses = message.text
 
-    if bonuses.isdigit():
-        if int(bonuses) > 0:
-            bonuses = int(bonuses)
+    if bonuses == "Главное меню":
+        main_menu(message)
 
-            process_points_type_3_result(
-                message,
-                uid=uid,
-                tour=tour,
-                question_number=question_number,
-                participant=participant,
-                bonuses=bonuses
-            )
-
-        else:
-            bot.reply_to(
-                message,
-                "Размер бонуса должен быть больше нуля"
-            )
+    elif bonuses == "Выход":
+        logout(message)
 
     else:
-        if bonuses == 'random':
-            response = bot.reply_to(
-                message,
-                'Введите минимальный и максимальный возможный размер бонуса через запятую (пример - 1, 100):'
-            )
+        if bonuses.isdigit():
+            if int(bonuses) > 0:
+                bonuses = int(bonuses)
 
-            bot.register_next_step_handler(
-                response,
-                process_points_type_3_result,
-                uid=uid,
-                tour=tour,
-                question_number=question_number,
-                participant=participant,
-                bonuses=None
-            )
+                process_points_type_3_result(
+                    message,
+                    uid=uid,
+                    tour=tour,
+                    question_number=question_number,
+                    participant=participant,
+                    bonuses=bonuses
+                )
+
+            else:
+                bot.reply_to(
+                    message,
+                    "Размер бонуса должен быть больше нуля"
+                )
 
         else:
-            bot.reply_to(
-                message,
-                "Некорректный ввод размера бонуса"
-            )
+            if bonuses == 'random':
+                response = bot.reply_to(
+                    message,
+                    'Введите минимальный и максимальный возможный размер бонуса через запятую (пример - 1, 100):'
+                )
+
+                bot.register_next_step_handler(
+                    response,
+                    process_points_type_3_result,
+                    uid=uid,
+                    tour=tour,
+                    question_number=question_number,
+                    participant=participant,
+                    bonuses=None
+                )
+
+            else:
+                bot.reply_to(
+                    message,
+                    "Некорректный ввод размера бонуса"
+                )
 
 
 def process_points_type_3_result(message, **kwargs):
@@ -885,36 +1110,43 @@ def process_points_type_3_result(message, **kwargs):
 
     if bonuses is None:
         random_bonuses = message.text
-        random_bonuses = random_bonuses.replace(' ', '').split(',')
-        a = random_bonuses[0]
-        b = random_bonuses[1]
 
-        if a.isdigit() and b.isdigit():
-            a = int(a)
-            b = int(b)
+        if random_bonuses == "Главное меню":
+            main_menu(message)
 
-            if a > 0 and b > 0:
-                if b > a:
-                    bonuses = random.randint(a=a, b=b)
+        elif random_bonuses == "Выход":
+            logout(message)
+
+        else:
+            random_bonuses = random_bonuses.replace(' ', '').split(',')
+            a = random_bonuses[0]
+            b = random_bonuses[1]
+
+            if a.isdigit() and b.isdigit():
+                a = int(a)
+                b = int(b)
+
+                if a > 0 and b > 0:
+                    if b > a:
+                        bonuses = random.randint(a=a, b=b)
+
+                    else:
+                        bot.reply_to(
+                            message,
+                            "Диапазон бонуса должен быть указан от меньшего к большему в формате 'a, b'"
+                        )
 
                 else:
                     bot.reply_to(
                         message,
-                        "Диапазон бонуса должен быть указан от меньшего к большему в формате 'a, b'"
+                        "Принимаются только положительные числа"
                     )
 
             else:
                 bot.reply_to(
                     message,
-                    "Принимаются только положительные числа"
+                    "Некорректный ввод диапазона бонуса"
                 )
-
-        else:
-            bot.reply_to(
-                message,
-                "Некорректный ввод диапазона бонуса"
-            )
-
 
     if bonuses:
         transferor = Authorization.objects.get(
@@ -962,44 +1194,51 @@ def process_points_type_4_receiver(message, **kwargs):
     question_number = kwargs.get('question_number')
     sender_id = message.text
 
-    if sender_id.isdigit():
-        if int(sender_id) > 0:
-            sender = Authorization.objects.get(
-                id=sender_id
-            )
+    if sender_id == "Главное меню":
+        main_menu(message)
 
-            if sender:
-                response_receiver = bot.reply_to(
-                    message,
-                    f"Выберите участника, которому начисляем баллы по его ID в БД:"
+    elif sender_id == "Выход":
+        logout(message)
+
+    else:
+        if sender_id.isdigit():
+            if int(sender_id) > 0:
+                sender = Authorization.objects.get(
+                    id=sender_id
                 )
 
-                bot.register_next_step_handler(
-                    response_receiver,
-                    process_points_type_4_amount,
-                    tour=tour,
-                    question_number=question_number,
-                    uid=uid,
-                    sender=sender,
-                )
+                if sender:
+                    response_receiver = bot.reply_to(
+                        message,
+                        f"Выберите участника, которому начисляем баллы по его ID в БД:"
+                    )
+
+                    bot.register_next_step_handler(
+                        response_receiver,
+                        process_points_type_4_amount,
+                        tour=tour,
+                        question_number=question_number,
+                        uid=uid,
+                        sender=sender,
+                    )
+
+                else:
+                    bot.reply_to(
+                        message,
+                        "Участника не существует в БД"
+                    )
 
             else:
                 bot.reply_to(
                     message,
-                    "Участника не существует в БД"
+                    "ID должен быть больше нуля"
                 )
 
         else:
             bot.reply_to(
                 message,
-                "ID должен быть больше нуля"
+                "ID должно быть числом"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "ID должно быть числом"
-        )
 
 
 def process_points_type_4_amount(message, **kwargs):
@@ -1012,45 +1251,52 @@ def process_points_type_4_amount(message, **kwargs):
     sender = kwargs.get('sender')
     receiver_id = message.text
 
-    receiver = Authorization.objects.get(
-        id=receiver_id
-    )
+    if receiver_id == "Главное меню":
+        main_menu(message)
 
-    if int(receiver.telegram_id) != int(sender.telegram_id):
-        if receiver:
-            if receiver.role_id == 3:
-                response = bot.reply_to(
-                    message,
-                    f"Введите количество начисляемых баллов:"
-                )
+    elif receiver_id == "Выход":
+        logout(message)
 
-                bot.register_next_step_handler(
-                    response,
-                    process_points_type_4_result,
-                    tour=tour,
-                    question_number=question_number,
-                    uid=uid,
-                    sender=sender,
-                    receiver=receiver,
-                )
+    else:
+        receiver = Authorization.objects.get(
+            id=receiver_id
+        )
+
+        if int(receiver.telegram_id) != int(sender.telegram_id):
+            if receiver:
+                if receiver.role_id == 3:
+                    response = bot.reply_to(
+                        message,
+                        f"Введите количество начисляемых баллов:"
+                    )
+
+                    bot.register_next_step_handler(
+                        response,
+                        process_points_type_4_result,
+                        tour=tour,
+                        question_number=question_number,
+                        uid=uid,
+                        sender=sender,
+                        receiver=receiver,
+                    )
+
+                else:
+                    bot.reply_to(
+                        message,
+                        "Я принимаю только участников"
+                    )
 
             else:
                 bot.reply_to(
                     message,
-                    "Я принимаю только участников"
+                    "Некорректный ID участника"
                 )
 
         else:
             bot.reply_to(
                 message,
-                "Некорректный ID участника"
+                "Нельзя переводить баллы самому себе"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "Нельзя переводить баллы самому себе"
-        )
 
 
 def process_points_type_4_result(message, **kwargs):
@@ -1064,70 +1310,77 @@ def process_points_type_4_result(message, **kwargs):
     receiver = kwargs.get('receiver')
     amount = message.text
 
-    if amount.isdigit():
-        amount = int(amount)
-        if amount > 0:
-            transferor = Authorization.objects.get(
-                telegram_id=uid
-            )
+    if amount == "Главное меню":
+        main_menu(message)
 
-            question = Question.objects.get(
-                tour_id=int(tour),
-                tour_question_number_id=int(question_number)
-            )
+    elif amount == "Выход":
+        logout(message)
 
-            if question:
-                transaction_row11 = PointsTransaction.objects.filter(
-                    sender_telegram_id=sender.telegram_id,
-                    transferor_telegram_id=transferor.telegram_id,
-                    question_id=question.id,
+    else:
+        if amount.isdigit():
+            amount = int(amount)
+            if amount > 0:
+                transferor = Authorization.objects.get(
+                    telegram_id=uid
                 )
 
-                transaction_row12 = PointsTransaction.objects.filter(
-                    sender_telegram_id=sender.telegram_id,
-                    receiver_telegram_id=receiver.telegram_id,
-                    transferor_telegram_id=transferor.telegram_id,
-                    question_id=question.id,
+                question = Question.objects.get(
+                    tour_id=int(tour),
+                    tour_question_number_id=int(question_number)
                 )
 
-                if not transaction_row11.exists():
-                    PointsTransaction.objects.create(
-                        transfer_datetime=timezone.now(),
-                        sender_telegram=sender.telegram_id,
-                        receiver_telegram=receiver.telegram_id,
-                        points_transferred=amount,
-                        transferor_telegram=transferor.telegram_id,
+                if question:
+                    transaction_row11 = PointsTransaction.objects.filter(
+                        sender_telegram_id=sender.telegram_id,
+                        transferor_telegram_id=transferor.telegram_id,
                         question_id=question.id,
                     )
 
-                else:
-                    if not transaction_row12.exists():
-                        transaction_row11.update(
-                            receiver_telegram_id=receiver.telegram_id,
-                        )
-
-                    transaction_row12.update(
-                        points_transferred=amount,
-                        transfer_datetime=timezone.now(),
-                        points_datetime=timezone.now(),
+                    transaction_row12 = PointsTransaction.objects.filter(
+                        sender_telegram_id=sender.telegram_id,
+                        receiver_telegram_id=receiver.telegram_id,
+                        transferor_telegram_id=transferor.telegram_id,
+                        question_id=question.id,
                     )
 
+                    if not transaction_row11.exists():
+                        PointsTransaction.objects.create(
+                            transfer_datetime=timezone.now(),
+                            sender_telegram=sender.telegram_id,
+                            receiver_telegram=receiver.telegram_id,
+                            points_transferred=amount,
+                            transferor_telegram=transferor.telegram_id,
+                            question_id=question.id,
+                        )
+
+                    else:
+                        if not transaction_row12.exists():
+                            transaction_row11.update(
+                                receiver_telegram_id=receiver.telegram_id,
+                            )
+
+                        transaction_row12.update(
+                            points_transferred=amount,
+                            transfer_datetime=timezone.now(),
+                            points_datetime=timezone.now(),
+                        )
+
+                    bot.reply_to(
+                        message,
+                        f"Баллы начислены участнику {receiver.full_name} в размере {amount} баллов/балла"
+                    )
+
+            else:
                 bot.reply_to(
                     message,
-                    f"Баллы начислены участнику {receiver.full_name} в размере {amount} баллов/балла"
+                    "Количество начисляемых баллов должно быть больше 0"
                 )
 
         else:
             bot.reply_to(
                 message,
-                "Количество начисляемых баллов должно быть больше 0"
+                "Количество начисляемых баллов должно быть числом"
             )
-
-    else:
-        bot.reply_to(
-            message,
-            "Количество начисляемых баллов должно быть числом"
-        )
 
 
 def tournament_rating(message, tour_number=None, my_telegram_id=None, sort_param="total_points"):
@@ -1426,7 +1679,7 @@ def tournament_rating(message, tour_number=None, my_telegram_id=None, sort_param
         )
 
 
-@bot.message_handler(commands=['tournament_rating'])
+@bot.message_handler(func=lambda message: 'Общий рейтинг по баллам' in message.text or message.text == '/tournament_rating')
 def tournament_rating_realization(message):
     """"
     Выводит общий рейтинг турнира в виде Excel-файла
@@ -1444,7 +1697,7 @@ def tournament_rating_realization(message):
     if user_auth_data.exists():
         if custom_user.is_authorized:
             tournament_rating(
-                message = message
+                message=message
             )
 
         else:
@@ -1460,7 +1713,7 @@ def tournament_rating_realization(message):
         )
 
 
-@bot.message_handler(commands=['participant_rating'])
+@bot.message_handler(func=lambda message: 'Мое место в рейтинге по баллам' in message.text or message.text == '/participant_rating')
 def participant_question(message):
     """"
     Фиксирует Telegram ID участника для вывода индивидуального рейтинга
@@ -1493,13 +1746,31 @@ def participant_question(message):
                         f"{part_id}: {part_name}" + f" (Telegram: {part_nick}, {part_tel_id})"
                     )
 
+                markup = types.ReplyKeyboardMarkup(
+                    resize_keyboard=True
+                )
+
+                btn_main_menu = types.KeyboardButton(
+                    text='Главное меню'
+                )
+
+                btn_logout = types.KeyboardButton(
+                    text='Выход'
+                )
+
+                markup.add(
+                    btn_main_menu,
+                    btn_logout
+                )
+
                 participants_list = "\n".join(
                     participants_list
                 )
 
                 bot.reply_to(
                     message,
-                    f"Список участников: \n{participants_list}"
+                    f"Список участников: \n{participants_list}",
+                    reply_markup=markup,
                 )
 
                 response = bot.reply_to(
@@ -1536,13 +1807,21 @@ def process_participant_rating_question(message):
     Выводит индивидуальный рейтинг турнира в виде Excel-файла
     """
     telegram_id = message.text
-    tournament_rating(
-        message=message,
-        my_telegram_id=telegram_id
-    )
+
+    if telegram_id == "Главное меню":
+        main_menu(message)
+
+    elif telegram_id == "Выход":
+        logout(message)
+
+    else:
+        tournament_rating(
+            message=message,
+            my_telegram_id=telegram_id
+        )
 
 
-@bot.message_handler(commands=['tour_statistics'])
+@bot.message_handler(func=lambda message: 'Общий рейтинг тура по баллам' in message.text or message.text == '/tour_statistics')
 def tour_question(message):
     """"
     Фиксирует номер тура для вывода рейтинга участников в разрезе тура
@@ -1559,9 +1838,27 @@ def tour_question(message):
 
     if user_auth_data.exists():
         if custom_user.is_authorized:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_main_menu = types.KeyboardButton(
+                text='Главное меню'
+            )
+
+            btn_logout = types.KeyboardButton(
+                text='Выход'
+            )
+
+            markup.add(
+                btn_main_menu,
+                btn_logout
+            )
+
             response = bot.reply_to(
                 message,
-                "Введите номер тура по которому хотите получить статистику"
+                "Введите номер тура по которому хотите получить статистику",
+                reply_markup=markup,
             )
 
             bot.register_next_step_handler(
@@ -1588,14 +1885,21 @@ def process_tour_question(message):
     """
     tour_number = message.text
 
-    tournament_rating(
-        message,
-        tour_number
-    )
+    if tour_number == "Главное меню":
+        main_menu(message)
+
+    elif tour_number == "Выход":
+        logout(message)
+
+    else:
+        tournament_rating(
+            message,
+            tour_number
+        )
 
 
-@bot.message_handler(commands=['tours_statistics'])
-def tour_question(message):
+@bot.message_handler(func=lambda message: 'Общий рейтинг по всем турам' in message.text or message.text == '/tours_statistics')
+def tours_output(message):
     """"
     Выводит рейтинг всех туров сразу в виде Excel-файла
     """
@@ -1642,7 +1946,7 @@ def tour_question(message):
         )
 
 
-@bot.message_handler(commands=['answers_rating'])
+@bot.message_handler(func=lambda message: 'Общий рейтинг по верным ответам' in message.text or message.text == '/answers_rating')
 def answers_rating(message):
     """"
     Выводит рейтинг участников с сортированием по количеству правильных ответов
@@ -1677,14 +1981,13 @@ def answers_rating(message):
         )
 
 
-@bot.message_handler(commands=['start_quiz'])
+@bot.message_handler(func=lambda message: 'Начать викторину' in message.text or message.text == '/start_quiz')
 def start_quiz(message, question_number=None):
     """"
     Начинает викторину или продолжает ее в зависимости от question_number
     question_number - номер вопроса в турнире (ID из таблицы Question)
     """
     uid = message.from_user.id
-
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
@@ -1696,6 +1999,23 @@ def start_quiz(message, question_number=None):
     if user_auth_data.exists():
         if custom_user.is_authorized:
             if custom_user.role_id == 3:
+                markup = types.ReplyKeyboardMarkup(
+                    resize_keyboard=True
+                )
+
+                btn_main_menu = types.KeyboardButton(
+                    text='Главное меню'
+                )
+
+                btn_logout = types.KeyboardButton(
+                    text='Выход'
+                )
+
+                markup.add(
+                    btn_main_menu,
+                    btn_logout
+                )
+
                 questions = Question.objects.all()
 
                 if questions.exists():
@@ -1740,6 +2060,12 @@ def start_quiz(message, question_number=None):
                             id=question_number
                         )
 
+                else:
+                    bot.reply_to(
+                        message,
+                        'Нет вопросов для викторины'
+                    )
+
                 if question:
                     tour = question.first().tour_id
                     tour_question_number_id = question.first().tour_question_number_id
@@ -1760,7 +2086,7 @@ def start_quiz(message, question_number=None):
                         question_id=question_number,
                     )
 
-                    if not participant.exists() or participant.is_done == 0:
+                    if not participant.exists() or participant.first().is_done == 0:
                         bot.reply_to(
                             message,
                             text=f"### Тур № {tour} ### Вопрос № {tour_question_number_id} ###",
@@ -1786,9 +2112,27 @@ def start_quiz(message, question_number=None):
                     )
 
                 else:
+                    markup = types.ReplyKeyboardMarkup(
+                        resize_keyboard=True
+                    )
+
+                    btn_main_menu = types.KeyboardButton(
+                        text='Главное меню'
+                    )
+
+                    btn_logout = types.KeyboardButton(
+                        text='Выход'
+                    )
+
+                    markup.add(
+                        btn_main_menu,
+                        btn_logout
+                    )
+
                     bot.reply_to(
                         message,
-                        "На этом викторина окончена"
+                        "На этом викторина окончена",
+                        reply_markup=markup,
                     )
 
             else:
@@ -1822,7 +2166,13 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
         question_id=question_number,
     )
 
-    if message.text == correct_answer:
+    if message.text == 'Главное меню':
+        main_menu(message)
+
+    elif message.text == 'Выход':
+        logout(message)
+
+    elif message.text == correct_answer:
         bot.send_message(
             message.chat.id,
             f"Верно! \n{answer_explanation}", reply_markup=types.ReplyKeyboardRemove()
@@ -1837,7 +2187,7 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
             )
 
         else:
-            if participant.is_done == 0:
+            if participant.first().is_done == 0:
                 PointsTransaction.objects.filter(
                     sender_telegram_id=uid,
                     question_id=question_number,

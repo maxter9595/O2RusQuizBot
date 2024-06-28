@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.contrib.auth.hashers import make_password
+
 from tgbot.models import Role, Authorization, CustomUser, Question
 
 
@@ -58,6 +60,11 @@ class CustomUserAdmin(admin.ModelAdmin):
         'username',
         'role'
     ]
+
+    def save_model(self, request, obj, form, change):
+        if form.cleaned_data.get('password'):
+            obj.password = make_password(form.cleaned_data['password'])
+        obj.save()
 
 
 @admin.register(Question)
