@@ -143,7 +143,7 @@ README.md
 
 
 # Видеодемонстрация чат-бота ТГ
-- Ссылка на видеодемонстрацию: https://drive.google.com/file/d/1GioVvQSoHVtV0hJKbFgTSVc9BBzkeYE1/view?usp=sharing)
+- Ссылка на видеодемонстрацию: https://drive.google.com/file/d/1GioVvQSoHVtV0hJKbFgTSVc9BBzkeYE1/view?usp=sharing
 
 
 # Команды чат-бота Telegram
