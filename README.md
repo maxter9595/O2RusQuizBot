@@ -143,10 +143,7 @@ README.md
 
 
 # Видеодемонстрация чат-бота ТГ
-<video width="320" height="240" controls>
-  <source src="URL_ВИДЕО_MP4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+- Ссылка на видеодемонстрацию: https://drive.google.com/file/d/1GioVvQSoHVtV0hJKbFgTSVc9BBzkeYE1/view?usp=sharing)
 
 
 # Команды чат-бота Telegram
