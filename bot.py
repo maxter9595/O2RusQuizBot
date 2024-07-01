@@ -1645,6 +1645,33 @@ def tournament_rating(message, tour_number=None, my_telegram_id=None, sort_param
                             caption='Рейтинг участников турнира'
                         )
 
+                        message_text = 'Список участников в рейтинге:\n\n'
+                        for participant in data_list:
+
+                            text_info = '\n'.join([
+                                f'Место: {participant[0]}',
+                                f'ФИО: {participant[1]}',
+                                f'Никнейм в Telegram: {participant[2]}',
+                                f'Telegram ID: {participant[3]}',
+                                f'Общее количество баллов: {participant[4]}',
+                                f'Баллы, начисленные по рейтингу: {participant[5]}',
+                                f'Баллы, начисленные по РОТ/ПОТ: {participant[6]}',
+                                f'Баллы, начисленные по бонусам: {participant[7]}',
+                                f'Прибыль от трансфера баллов: {participant[8]}',
+                                f'Суммарный доход от трансфера: {participant[9]}',
+                                f'Суммарный убыток от трансфера: {participant[10]}',
+                                f'Количество правильных ответов: {participant[11]}',
+                                f'Количество вопросов: {participant[12]}',
+                                f'Количество туров: {participant[13]}\n\n',
+                            ])
+
+                            message_text += text_info
+
+                        bot.reply_to(
+                            message,
+                            message_text
+                        )
+
                     else:
                         try:
                             idx = list(ranked_data.keys()).index(my_telegram_id)
@@ -1656,6 +1683,30 @@ def tournament_rating(message, tour_number=None, my_telegram_id=None, sort_param
                                 message.chat.id,
                                 document=open('results.xlsx', 'rb'),
                                 caption=f'Рейтинг участника ({full_name}, {telegram_id})'
+                            )
+
+                            message_text = 'Положение участника в рейтинге:\n\n'
+
+                            text_info = '\n'.join([
+                                f'Место: {participant_data[0]}',
+                                f'ФИО: {participant_data[1]}',
+                                f'Никнейм в Telegram: {participant_data[2]}',
+                                f'Telegram ID: {participant_data[3]}',
+                                f'Общее количество баллов: {participant_data[4]}',
+                                f'Баллы, начисленные по рейтингу: {participant_data[5]}',
+                                f'Баллы, начисленные по РОТ/ПОТ: {participant_data[6]}',
+                                f'Баллы, начисленные по бонусам: {participant_data[7]}',
+                                f'Прибыль от трансфера баллов: {participant_data[8]}',
+                                f'Суммарный доход от трансфера: {participant_data[9]}',
+                                f'Суммарный убыток от трансфера: {participant_data[10]}',
+                                f'Количество правильных ответов: {participant_data[11]}',
+                                f'Количество вопросов: {participant_data[12]}',
+                                f'Количество туров: {participant_data[13]}\n\n',
+                            ])
+
+                            bot.reply_to(
+                                message,
+                                message_text + text_info
                             )
 
                         except ValueError:
@@ -1670,6 +1721,33 @@ def tournament_rating(message, tour_number=None, my_telegram_id=None, sort_param
                             message.chat.id,
                             document=open('results.xlsx', 'rb'),
                             caption='Рейтинг участников тура №' + str(tour_number)
+                        )
+
+                        message_text = f'Список участников в рейтинге по туру № {tour_number}:\n\n'
+                        for participant in data_list:
+
+                            text_info = '\n'.join([
+                                f'Место: {participant[0]}',
+                                f'ФИО: {participant[1]}',
+                                f'Никнейм в Telegram: {participant[2]}',
+                                f'Telegram ID: {participant[3]}',
+                                f'Общее количество баллов: {participant[4]}',
+                                f'Баллы, начисленные по рейтингу: {participant[5]}',
+                                f'Баллы, начисленные по РОТ/ПОТ: {participant[6]}',
+                                f'Баллы, начисленные по бонусам: {participant[7]}',
+                                f'Прибыль от трансфера баллов: {participant[8]}',
+                                f'Суммарный доход от трансфера: {participant[9]}',
+                                f'Суммарный убыток от трансфера: {participant[10]}',
+                                f'Количество правильных ответов: {participant[11]}',
+                                f'Количество вопросов: {participant[12]}',
+                                f'Количество туров: {participant[13]}\n\n',
+                            ])
+
+                            message_text += text_info
+
+                        bot.reply_to(
+                            message,
+                            message_text
                         )
 
     else:
@@ -1696,6 +1774,30 @@ def tournament_rating_realization(message):
 
     if user_auth_data.exists():
         if custom_user.is_authorized:
+
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_main_menu = types.KeyboardButton(
+                text='Главное меню'
+            )
+
+            btn_logout = types.KeyboardButton(
+                text='Выход'
+            )
+
+            markup.add(
+                btn_main_menu,
+                btn_logout
+            )
+
+            bot.send_message(
+                message.chat.id,
+                "Общий рейтинг по баллам",
+                reply_markup=markup
+            )
+
             tournament_rating(
                 message=message
             )
@@ -1915,16 +2017,40 @@ def tours_output(message):
 
     if user_auth_data.exists():
         if custom_user.is_authorized:
+
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_main_menu = types.KeyboardButton(
+                text='Главное меню'
+            )
+
+            btn_logout = types.KeyboardButton(
+                text='Выход'
+            )
+
+            markup.add(
+                btn_main_menu,
+                btn_logout
+            )
+
             tours = Question.objects.all().values_list(
                 'tour_id',
                 flat=True
             ).distinct()
 
             if tours.exists():
+                bot.reply_to(
+                     message,
+                    'Вывожу результаты туров',
+                    reply_markup=markup
+                )
+
                 for tour in tours:
                     tournament_rating(
                         message,
-                        tour_number=tour
+                        tour_number=tour,
                     )
 
             else:
@@ -1963,6 +2089,30 @@ def answers_rating(message):
 
     if user_auth_data.exists():
         if custom_user.is_authorized:
+
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_main_menu = types.KeyboardButton(
+                text='Главное меню'
+            )
+
+            btn_logout = types.KeyboardButton(
+                text='Выход'
+            )
+
+            markup.add(
+                btn_main_menu,
+                btn_logout
+            )
+
+            bot.reply_to(
+                message,
+                'Вывожу рейтинг участников с сортировкой по количеству правильных ответов',
+                reply_markup=markup
+            )
+
             tournament_rating(
                 message,
                 sort_param='total_right_answers'
