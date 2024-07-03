@@ -1,6 +1,7 @@
 import os
 import time
 import random
+import re
 
 import django
 import telebot
@@ -55,9 +56,14 @@ def start(message):
             text='Авторизация'
         )
 
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
         markup.add(
             btn_register,
-            btn_login
+            btn_login,
+            btn_password
         )
 
         bot.reply_to(
@@ -66,6 +72,7 @@ def start(message):
                 'Добро пожаловать!',
                 '📝 Для регистрации введите /register',
                 '🔒 Для авторизации введите /login',
+                '🔒 Для изменения пароля введите /password'
             ]),
             reply_markup=markup,
         )
@@ -101,10 +108,12 @@ def process_full_name(message):
     Получает информацию о ФИО пользователя, запрашивает дату рождения
     """
     full_name = message.text
+
     response = bot.reply_to(
         message=message,
-        text="Введите вашу дату рождения в формате ГГГГ-ММ-ДД (пример - 2024-06-03):"
+        text="Введите вашу дату рождения в формате ДД.ММ.ГГГГ (пример - 07.07.2007):"
     )
+
     bot.register_next_step_handler(
         response,
         process_date_of_birth,
@@ -117,16 +126,27 @@ def process_date_of_birth(message, full_name):
     Получает информацию о дате рождения, запрашивает номер телефона
     """
     date_of_birth = message.text
-    response = bot.reply_to(
-        message=message,
-        text="Введите ваш номер телефона в формате 8xxxxxxxxxx (пример - 89053743009):"
-    )
-    bot.register_next_step_handler(
-        response,
-        process_phone_number,
-        full_name=full_name,
-        date_of_birth=date_of_birth
-    )
+    date_pattern = re.compile(r'\d{2}.\d{2}.\d{4}')
+
+    if date_pattern.fullmatch(date_of_birth):
+        date_of_birth = '-'.join(date_of_birth.split('.')[::-1])
+
+        response = bot.reply_to(
+            message=message,
+            text="Введите ваш номер телефона в формате 8xxxxxxxxxx (пример - 89053743009):"
+        )
+        bot.register_next_step_handler(
+            response,
+            process_phone_number,
+            full_name=full_name,
+            date_of_birth=date_of_birth
+        )
+
+    else:
+        bot.reply_to(
+            message=message,
+            text="Введенная дата рождения некорректна"
+        )
 
 
 def process_phone_number(message, full_name, date_of_birth):
@@ -134,17 +154,26 @@ def process_phone_number(message, full_name, date_of_birth):
     Получает информацию о номере телефона, запрашивает будущий пароль пользователя
     """
     phone_number = message.text
-    response = bot.reply_to(
-        message=message,
-        text="Введите ваш пароль для авторизации:"
-    )
-    bot.register_next_step_handler(
-        response,
-        process_password_registration,
-        full_name=full_name,
-        date_of_birth=date_of_birth,
-        phone_number=phone_number
-    )
+    phone_pattern = re.compile(r'^[8-9]\d{10}$')
+
+    if phone_pattern.match(phone_number):
+        response = bot.reply_to(
+            message=message,
+            text="Введите ваш пароль для авторизации:"
+        )
+        bot.register_next_step_handler(
+            response,
+            process_password_registration,
+            full_name=full_name,
+            date_of_birth=date_of_birth,
+            phone_number=phone_number
+        )
+
+    else:
+        bot.reply_to(
+            message=message,
+            text="Введенный номер телефона некорректен"
+        )
 
 
 def process_password_registration(message, full_name, date_of_birth, phone_number):
@@ -260,6 +289,70 @@ def process_password(message, custom_user):
         )
 
 
+@bot.message_handler(func=lambda message: "Забыл пароль" in message.text or message.text == "/password")
+def change_password(message):
+    """
+    Меняет пароль в случае, если пользователь забыл его
+    """
+    uid = message.from_user.id
+    auth_data = Authorization.objects.filter(
+        telegram_id=str(uid)
+    )
+
+    if not auth_data.exists():
+        bot.reply_to(
+            message=message,
+            text="Вы не зарегистрированы. Для регистрации введите /register"
+        )
+
+    else:
+        custom_user = CustomUser.objects.get(
+            username_id=auth_data.first().id
+        )
+
+        if custom_user:
+            if custom_user.is_authorized == False:
+                response = bot.reply_to(
+                    message,
+                    "Введите ваш новый пароль:"
+                )
+
+                bot.register_next_step_handler(
+                    response,
+                    callback=get_new_password,
+                )
+
+            else:
+                bot.reply_to(
+                    message,
+                    "Вы авторизованы. Разавторизируйтесь для получения нового пароля: /logout"
+                )
+
+
+def get_new_password(message):
+    new_password = message.text
+
+    hashed_password = make_password(new_password)
+    uid = message.from_user.id
+
+    auth_user = Authorization.objects.filter(
+        telegram_id=str(uid)
+    )
+
+    if auth_user.exists():
+        CustomUser.objects.filter(
+            username_id=auth_user.first().id
+        ).update(
+            password=hashed_password
+        )
+
+        bot.reply_to(
+            message=message,
+            text="Изменение пароля прошло успешно. Авторизируйтесь через команду /login"
+        )
+
+
+
 @bot.message_handler(func=lambda message: "Главное меню" in message.text or message.text == "/main_menu")
 def main_menu(message):
     """
@@ -366,6 +459,7 @@ def logout(message):
 
     if auth_data.exists():
         username_id = auth_data.first().id
+
         custom_user = CustomUser.objects.get(
             username_id=username_id
         )
@@ -386,9 +480,14 @@ def logout(message):
                 text='Авторизация'
             )
 
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
             markup.add(
                 btn_register,
                 btn_login,
+                btn_password
             )
 
             bot.reply_to(
@@ -398,15 +497,60 @@ def logout(message):
             )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
                 "Вы не авторизованы"
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login,
+            btn_password
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы"
+            "Вы не зарегистрированы. Для регистрации введите /register",
+            reply_markup=markup,
         )
 
 
@@ -415,17 +559,23 @@ def add_points_check(message):
     """
     Проверяет, является ли пользователь директором. Если директор, то запрашивает тип начисления баллов участнику
     """
+    is_AttributeError = False
     uid = message.from_user.id
+
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
 
-    username_id = user_auth_data.first().id
-    custom_user = CustomUser.objects.get(
-        username_id=username_id
-    )
+    try:
+        username_id = user_auth_data.first().id
+        custom_user = CustomUser.objects.get(
+            username_id=username_id
+        )
 
-    if user_auth_data.exists():
+    except AttributeError as e:
+        is_AttributeError = True
+
+    if user_auth_data.exists() and not is_AttributeError:
         if custom_user.is_authorized:
             user_auth_data = user_auth_data.first()
 
@@ -474,15 +624,61 @@ def add_points_check(message):
                 )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
-                "Вы не авторизованы. Для авторизации введите /login"
+                "Вы не авторизованы. Для авторизации введите /login",
+                reply_markup=markup,
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login,
+            btn_password
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы. Для регистрации введите /register"
+            "Вы не зарегистрированы. Для регистрации введите /register",
+            reply_markup=markup,
         )
 
 
@@ -1762,17 +1958,21 @@ def tournament_rating_realization(message):
     """"
     Выводит общий рейтинг турнира в виде Excel-файла
     """
+    is_AttributeError = False
     uid = message.from_user.id
 
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
 
-    custom_user = CustomUser.objects.get(
-        username_id=user_auth_data.first().id
-    )
+    try:
+        custom_user = CustomUser.objects.get(
+            username_id=user_auth_data.first().id
+        )
+    except AttributeError as e:
+        is_AttributeError = True
 
-    if user_auth_data.exists():
+    if user_auth_data.exists() and not is_AttributeError:
         if custom_user.is_authorized:
 
             markup = types.ReplyKeyboardMarkup(
@@ -1803,15 +2003,61 @@ def tournament_rating_realization(message):
             )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
-                "Вы не авторизованы. Для авторизации введите /login"
+                "Вы не авторизованы. Для авторизации введите /login",
+                reply_markup=markup,
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login,
+            btn_password
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы. Для регистрации введите /register"
+            "Вы не зарегистрированы. Для регистрации введите /register",
+            reply_markup=markup
         )
 
 
@@ -1820,22 +2066,25 @@ def participant_question(message):
     """"
     Фиксирует Telegram ID участника для вывода индивидуального рейтинга
     """
+    is_AttributeError = False
     uid = message.from_user.id
-
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
 
-    custom_user = CustomUser.objects.get(
-        username_id=user_auth_data.first().id
-    )
+    try:
+        custom_user = CustomUser.objects.get(
+            username_id=user_auth_data.first().id
+        )
+    except AttributeError as e:
+        is_AttributeError = True
 
     participants = Authorization.objects.all().filter(
         role=3
     )
 
     participants_list = []
-    if user_auth_data.exists():
+    if user_auth_data.exists() and not is_AttributeError:
         if custom_user.is_authorized:
             if participants.exists():
                 for participant in participants:
@@ -1892,15 +2141,61 @@ def participant_question(message):
                 )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
-                "Вы не авторизованы. Для авторизации введите /login"
+                "Вы не авторизованы. Для авторизации введите /login",
+                reply_markup=markup,
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login,
+            btn_password
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы. Для регистрации введите /register"
+            "Вы не зарегистрированы. Для регистрации введите /register",
+            reply_markup=markup
         )
 
 
@@ -1928,17 +2223,20 @@ def tour_question(message):
     """"
     Фиксирует номер тура для вывода рейтинга участников в разрезе тура
     """
+    is_AttributeError = False
     uid = message.from_user.id
-
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
 
-    custom_user = CustomUser.objects.get(
-        username_id=user_auth_data.first().id
-    )
+    try:
+        custom_user = CustomUser.objects.get(
+            username_id=user_auth_data.first().id
+        )
+    except AttributeError as e:
+        is_AttributeError = True
 
-    if user_auth_data.exists():
+    if user_auth_data.exists() and not is_AttributeError:
         if custom_user.is_authorized:
             markup = types.ReplyKeyboardMarkup(
                 resize_keyboard=True
@@ -1969,15 +2267,61 @@ def tour_question(message):
             )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
-                "Вы не авторизованы. Для авторизации введите /login"
+                "Вы не авторизованы. Для авторизации введите /login",
+                reply_markup=markup,
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login,
+            btn_password
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы. Для регистрации введите /register"
+            "Вы не зарегистрированы. Для регистрации введите /register",
+            reply_markup=markup
         )
 
 
@@ -2005,17 +2349,20 @@ def tours_output(message):
     """"
     Выводит рейтинг всех туров сразу в виде Excel-файла
     """
+    is_AttributeError = False
     uid = message.from_user.id
-
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
 
-    custom_user = CustomUser.objects.get(
-        username_id=user_auth_data.first().id
-    )
+    try:
+        custom_user = CustomUser.objects.get(
+            username_id=user_auth_data.first().id
+        )
+    except AttributeError as e:
+        is_AttributeError = True
 
-    if user_auth_data.exists():
+    if user_auth_data.exists() and not is_AttributeError:
         if custom_user.is_authorized:
 
             markup = types.ReplyKeyboardMarkup(
@@ -2060,15 +2407,61 @@ def tours_output(message):
                 )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
-                "Вы не авторизованы. Для авторизации введите /login"
+                "Вы не авторизованы. Для авторизации введите /login",
+                reply_markup=markup,
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login,
+            btn_password
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы. Для регистрации введите /register"
+            "Вы не зарегистрированы. Для регистрации введите /register",
+            reply_markup=markup,
         )
 
 
@@ -2077,17 +2470,20 @@ def answers_rating(message):
     """"
     Выводит рейтинг участников с сортированием по количеству правильных ответов
     """
+    is_AttributeError = False
     uid = message.from_user.id
-
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
 
-    custom_user = CustomUser.objects.get(
-        username_id=user_auth_data.first().id
-    )
+    try:
+        custom_user = CustomUser.objects.get(
+            username_id=user_auth_data.first().id
+        )
+    except AttributeError as e:
+        is_AttributeError = True
 
-    if user_auth_data.exists():
+    if user_auth_data.exists() and not is_AttributeError:
         if custom_user.is_authorized:
 
             markup = types.ReplyKeyboardMarkup(
@@ -2119,149 +2515,141 @@ def answers_rating(message):
             )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
-                "Вы не авторизованы. Для авторизации введите /login"
+                "Вы не авторизованы. Для авторизации введите /login",
+                reply_markup=markup,
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_register = types.KeyboardButton(
+            text='Регистрация'
+        )
+
+        btn_login = types.KeyboardButton(
+            text='Авторизация'
+        )
+
+        btn_password = types.KeyboardButton(
+            text='Забыл пароль'
+        )
+
+        markup.add(
+            btn_register,
+            btn_login,
+            btn_password
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы. Для регистрации введите /register"
+            "Вы не зарегистрированы. Для регистрации введите /register",
+            reply_markup=markup,
         )
 
 
 @bot.message_handler(func=lambda message: 'Начать викторину' in message.text or message.text == '/start_quiz')
-def start_quiz(message, question_number=None):
+def tour_question(message):
+    questions = Question.objects.all()
+
+    if questions.exists():
+        tours = questions.values_list(
+            'tour_id',
+            flat=True
+        ).distinct()
+
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        for tour in tours:
+            markup.add(types.KeyboardButton(
+                text=str(tour)
+                )
+            )
+
+        reply = bot.reply_to(
+            message,
+            'Выберите тур для начала викторины:',
+            reply_markup=markup,
+        )
+
+        bot.register_next_step_handler(
+            reply,
+            start_quiz,
+            tours=[str(tour) for tour in tours],
+        )
+
+    else:
+        bot.reply_to(
+            message,
+            "Нет доступных туров для викторины"
+        )
+
+
+def start_quiz(message, tours, question_number=None, tour_id=None, question_id=None):
     """"
     Начинает викторину или продолжает ее в зависимости от question_number
     question_number - номер вопроса в турнире (ID из таблицы Question)
     """
+
+    is_AttributeError = False
+    is_tour_number = False
+    is_over = False
+    is_repeat = False
+
     uid = message.from_user.id
+
+    if not tour_id:
+        tour_input = message.text
+
+        if tour_input in tours:
+            is_tour_number = True
+
+    else:
+        if tour_id in tours:
+            is_tour_number = True
+
     user_auth_data = Authorization.objects.filter(
         telegram_id=uid
     )
 
-    custom_user = CustomUser.objects.get(
-        username_id=user_auth_data.first().id
-    )
+    try:
+        custom_user = CustomUser.objects.get(
+            username_id=user_auth_data.first().id
+        )
+    except AttributeError as e:
+        is_AttributeError = True
 
-    if user_auth_data.exists():
-        if custom_user.is_authorized:
-            if custom_user.role_id == 3:
-                markup = types.ReplyKeyboardMarkup(
-                    resize_keyboard=True
-                )
-
-                btn_main_menu = types.KeyboardButton(
-                    text='Главное меню'
-                )
-
-                btn_logout = types.KeyboardButton(
-                    text='Выход'
-                )
-
-                markup.add(
-                    btn_main_menu,
-                    btn_logout
-                )
-
-                questions = Question.objects.all()
-
-                if questions.exists():
-                    if not question_number:
-                        question_number = 1
-
-                        participant = PointsTransaction.objects.filter(
-                            sender_telegram_id=message.from_user.id,
-                        )
-
-                        is_over = False
-                        if participant.exists():
-                            is_done_list = participant.values_list(
-                                'is_done',
-                                flat=True
-                            )
-
-                            sum_is_done = sum(
-                                is_done_list
-                            )
-
-                            if sum_is_done == questions.count():
-                                bot.reply_to(
-                                    message,
-                                    'Викторина уже завершена'
-                                )
-                                is_over = True
-
-                        else:
-                            bot.reply_to(
-                                message,
-                                'Начинаем викторину'
-                            )
-
-                        if not is_over:
-                            question = Question.objects.filter(
-                                id=question_number
-                            )
-
-                    else:
-                        question = Question.objects.filter(
-                            id=question_number
-                        )
-
-                else:
-                    bot.reply_to(
-                        message,
-                        'Нет вопросов для викторины'
-                    )
-
-                if question:
-                    tour = question.first().tour_id
-                    tour_question_number_id = question.first().tour_question_number_id
-                    question_text = question.first().question_text
-                    answer_explanation = question.first().explanation[1:][:-1]
-
-                    answer_dict = {
-                        'A': question.first().answer_a,
-                        'B': question.first().answer_b,
-                        'C': question.first().answer_c,
-                        'D': question.first().answer_d,
-                    }
-
-                    correct_answer = answer_dict.get(question.first().correct_answer)
-
-                    participant = PointsTransaction.objects.filter(
-                        sender_telegram_id=message.from_user.id,
-                        question_id=question_number,
-                    )
-
-                    if not participant.exists() or participant.first().is_done == 0:
-                        bot.reply_to(
-                            message,
-                            text=f"### Тур № {tour} ### Вопрос № {tour_question_number_id} ###",
-                        )
-
-                    markup = types.ReplyKeyboardMarkup(row_width=2)
-                    for option in list(answer_dict.values()):
-                        button = types.KeyboardButton(option)
-                        markup.add(button)
-
-                    bot.send_message(
-                        message.chat.id,
-                        text=question_text,
-                        reply_markup=markup,
-                    )
-
-                    bot.register_next_step_handler(
-                        message,
-                        handle_answer,
-                        correct_answer=correct_answer,
-                        question_number=question_number,
-                        answer_explanation=answer_explanation,
-                    )
-
-                else:
+    if is_tour_number:
+        if user_auth_data.exists() and not is_AttributeError:
+            if custom_user.is_authorized:
+                if custom_user.role_id == 3:
                     markup = types.ReplyKeyboardMarkup(
                         resize_keyboard=True
                     )
@@ -2279,33 +2667,263 @@ def start_quiz(message, question_number=None):
                         btn_logout
                     )
 
+                    questions = Question.objects.filter(
+                        tour_id=tour_input if not tour_id else tour_id
+                    )
+
+                    if questions.exists():
+
+                        if not question_id:
+                            question_ids = [
+                                question.id for question in questions
+                            ]
+                            question_id = min(question_ids)
+
+                        if not question_number:
+                            question_number = 1
+
+                            participant = PointsTransaction.objects.filter(
+                                sender_telegram_id=message.from_user.id,
+                                question_id__in=question_ids
+                            )
+
+                            if participant.exists():
+                                is_done_list = participant.values_list(
+                                    'is_done',
+                                    flat=True
+                                )
+
+                                sum_is_done = len(
+                                    is_done_list
+                                )
+
+                                if sum_is_done == questions.count():
+                                    is_over = True
+                                    is_repeat = True
+                                    question = None
+
+                                    markup = types.ReplyKeyboardMarkup(
+                                        resize_keyboard=True
+                                    )
+
+                                    btn_main_menu = types.KeyboardButton(
+                                        text='Главное меню'
+                                    )
+
+                                    btn_logout = types.KeyboardButton(
+                                        text='Выход'
+                                    )
+
+                                    markup.add(
+                                        btn_main_menu,
+                                        btn_logout
+                                    )
+
+                                    bot.reply_to(
+                                        message,
+                                        'Викторина уже завершена',
+                                        reply_markup=markup,
+                                    )
+
+                            else:
+                                bot.reply_to(
+                                    message,
+                                    'Начинаем викторину'
+                                )
+
+                            if not is_over:
+                                question = Question.objects.filter(
+                                    tour_question_number_id=question_number,
+                                    tour_id=tour_input if not tour_id else tour_id
+                                )
+
+                        else:
+                            question = Question.objects.filter(
+                                tour_question_number_id=question_number,
+                                tour_id=tour_input if not tour_id else tour_id
+                            )
+
+                    else:
+                        question = None
+
+                        bot.reply_to(
+                            message,
+                            'Нет вопросов для викторины'
+                        )
+
+                    if question:
+                        tour = question.first().tour_id
+                        tour_question_number_id = question.first().tour_question_number_id
+                        question_text = question.first().question_text
+                        answer_explanation = question.first().explanation[1:][:-1]
+
+                        answer_dict = {
+                            'A': question.first().answer_a,
+                            'B': question.first().answer_b,
+                            'C': question.first().answer_c,
+                            'D': question.first().answer_d,
+                        }
+
+                        correct_answer = answer_dict.get(question.first().correct_answer)
+
+                        participant = PointsTransaction.objects.filter(
+                            sender_telegram_id=message.from_user.id,
+                            question_id=question_number,
+                        )
+
+                        if not participant.exists() or participant.first().is_done == 0:
+                            bot.reply_to(
+                                message,
+                                text=f"### Тур № {tour} ### Вопрос № {tour_question_number_id} ###",
+                            )
+
+                        markup = types.ReplyKeyboardMarkup(row_width=2)
+                        for option in list(answer_dict.values()):
+                            button = types.KeyboardButton(option)
+                            markup.add(button)
+
+                        bot.send_message(
+                            message.chat.id,
+                            text=question_text,
+                            reply_markup=markup,
+                        )
+
+                        image_path = question.first().image
+
+                        if image_path:
+                            try:
+                                with open(image_path.path, 'rb') as photo:
+                                    bot.send_photo(chat_id=message.chat.id, photo=photo)
+                            except Exception as e:
+                                print(f"Ошибка при отправке фото: {e}")
+
+                        bot.register_next_step_handler(
+                            message,
+                            handle_answer,
+                            correct_answer=correct_answer,
+                            question_number=question_number,
+                            answer_explanation=answer_explanation,
+                            tours=tours,
+                            tour_id=tour_input if not tour_id else tour_id,
+                            question_id=question_id
+                        )
+
+                    else:
+                        if not is_repeat:
+                            markup = types.ReplyKeyboardMarkup(
+                                resize_keyboard=True
+                            )
+
+                            btn_main_menu = types.KeyboardButton(
+                                text='Главное меню'
+                            )
+
+                            btn_logout = types.KeyboardButton(
+                                text='Выход'
+                            )
+
+                            markup.add(
+                                btn_main_menu,
+                                btn_logout
+                            )
+
+                            bot.reply_to(
+                                message,
+                                "На этом викторина тура окончена",
+                                reply_markup=markup,
+                            )
+
+                else:
                     bot.reply_to(
                         message,
-                        "На этом викторина окончена",
-                        reply_markup=markup,
+                        "Вы не являетесь участником турнира"
                     )
 
             else:
+                markup = types.ReplyKeyboardMarkup(
+                    resize_keyboard=True
+                )
+
+                btn_register = types.KeyboardButton(
+                    text='Регистрация'
+                )
+
+                btn_login = types.KeyboardButton(
+                    text='Авторизация'
+                )
+
+                btn_password = types.KeyboardButton(
+                    text='Забыл пароль'
+                )
+
+                markup.add(
+                    btn_register,
+                    btn_login,
+                    btn_password
+                )
+
                 bot.reply_to(
                     message,
-                    "Вы не являетесь участником турнира"
+                    "Вы не авторизованы. Для авторизации введите /login",
+                    reply_markup=markup,
                 )
 
         else:
+            markup = types.ReplyKeyboardMarkup(
+                resize_keyboard=True
+            )
+
+            btn_register = types.KeyboardButton(
+                text='Регистрация'
+            )
+
+            btn_login = types.KeyboardButton(
+                text='Авторизация'
+            )
+
+            btn_password = types.KeyboardButton(
+                text='Забыл пароль'
+            )
+
+            markup.add(
+                btn_register,
+                btn_login,
+                btn_password
+            )
+
             bot.reply_to(
                 message,
-                "Вы не авторизованы. Для авторизации введите /login"
+                "Вы не зарегистрированы. Для регистрации введите /register",
+                reply_markup=markup
             )
 
     else:
+        markup = types.ReplyKeyboardMarkup(
+            resize_keyboard=True
+        )
+
+        btn_main_menu = types.KeyboardButton(
+            text='Главное меню'
+        )
+
+        btn_logout = types.KeyboardButton(
+            text='Выход'
+        )
+
+        markup.add(
+            btn_main_menu,
+            btn_logout
+        )
+
         bot.reply_to(
             message,
-            "Вы не зарегистрированы. Для регистрации введите /register"
+            "Тур завершен",
+            reply_markup=markup,
         )
 
 
 @bot.message_handler(func=lambda message: True)
-def handle_answer(message, correct_answer, answer_explanation, question_number):
+def handle_answer(message, correct_answer, answer_explanation, question_number, tours, tour_id, question_id):
     """"
     Фиксирует ответ участника и переходит к следующему вопросу, если он есть
     """
@@ -2313,7 +2931,7 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
 
     participant = PointsTransaction.objects.filter(
         sender_telegram_id=uid,
-        question_id=question_number,
+        question_id=question_id,
     )
 
     if message.text == 'Главное меню':
@@ -2331,7 +2949,7 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
         if not participant.exists():
             PointsTransaction.objects.create(
                 sender_telegram_id=uid,
-                question_id=question_number,
+                question_id=question_id,
                 is_answered=1,
                 is_done=1,
             )
@@ -2340,7 +2958,7 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
             if participant.first().is_done == 0:
                 PointsTransaction.objects.filter(
                     sender_telegram_id=uid,
-                    question_id=question_number,
+                    question_id=question_id,
                 ).update(
                     is_answered=1,
                     is_done=1,
@@ -2348,7 +2966,10 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
 
         start_quiz(
             message,
-            question_number=question_number+1
+            tours=tours,
+            tour_id=tour_id,
+            question_number=question_number+1,
+            question_id=question_id+1
         )
 
     else:
@@ -2360,7 +2981,7 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
         if not participant:
             PointsTransaction.objects.create(
                 sender_telegram_id=uid,
-                question_id=question_number,
+                question_id=question_id,
                 is_answered=0,
                 is_done=1,
             )
@@ -2368,7 +2989,7 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
         else:
             PointsTransaction.objects.filter(
                 sender_telegram_id=uid,
-                question_id=question_number,
+                question_id=question_id,
             ).update(
                 is_answered=0,
                 is_done=1,
@@ -2376,7 +2997,10 @@ def handle_answer(message, correct_answer, answer_explanation, question_number):
 
         start_quiz(
             message,
-            question_number=question_number+1
+            tours=tours,
+            tour_id=tour_id,
+            question_number=question_number+1,
+            question_id=question_id + 1
         )
 
 

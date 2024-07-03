@@ -5,7 +5,7 @@ from django.apps import apps
 from django.utils import timezone
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
-from django.db.models.signals import pre_save, post_migrate, post_save
+from django.db.models.signals import pre_save, post_migrate, post_save, post_delete
 from django.contrib.auth.models import AbstractUser, Group, Permission
 
 from tgbot.apps import BotConfig
@@ -253,6 +253,38 @@ def update_custom_user(sender, instance, created, **kwargs):
             new_custom_user.save()
 
 
+@receiver(post_delete, sender=CustomUser)
+def delete_related_user(sender, instance, **kwargs):
+    """
+    Удаляет пользователя в модели Authorization после его удаления в CustomUser
+    """
+    Authorization.objects.filter(id=instance.username_id).delete()
+
+
+@receiver(pre_save, sender=CustomUser)
+def update_is_authorized(sender, instance, **kwargs):
+    """
+    Разавторизирует пользователя в модели CustomUser в случае изменения его роли
+    """
+    auth_obj = Authorization.objects.get(
+        id=instance.username_id
+    )
+    if instance.role_id != auth_obj.role_id:
+        instance.is_authorized = False
+
+
+@receiver(pre_save, sender=CustomUser)
+def update_authorization_role_id(sender, instance, **kwargs):
+    """
+    Обновляет роль пользователя в модели Authorization в случае изменения его идентификатора роли в CustomUser
+    """
+    auth_obj = Authorization.objects.get(
+        id=instance.username_id
+    )
+    auth_obj.role_id = instance.role_id
+    auth_obj.save()
+
+
 class Question(models.Model):
     """"
     Содержит данные по вопросам и ответам на них
@@ -265,6 +297,7 @@ class Question(models.Model):
     answer_d - вариант ответа D
     correct_answer - столбец, обозначающий правильный ответ (A, B, C, D)
     explanation - объяснение к правильному ответу
+    image - картинка вопроса
     """
     tour_id = models.PositiveIntegerField(
         null=False
@@ -302,6 +335,10 @@ class Question(models.Model):
     explanation = models.TextField(
         null=True,
         max_length=1500
+    )
+    image = models.ImageField(
+        null=True,
+        upload_to='questions_images/'
     )
 
     def __str__(self):
@@ -392,3 +429,21 @@ def update_transfer_datetime(sender, instance, **kwargs):
     """
     if instance.points_transferred is not None:
         instance.transfer_datetime = timezone.now()
+
+
+@receiver(pre_save, sender=Authorization)
+def delete_point_records(sender, instance, **kwargs):
+
+    if instance.role_id != 3:
+        PointsTransaction.objects.filter(
+            sender_telegram_id=instance.telegram_id,
+        ).delete()
+
+        PointsTransaction.objects.filter(
+            receiver_telegram_id=instance.telegram_id,
+        ).delete()
+
+    elif instance.role_id != 2:
+        PointsTransaction.objects.filter(
+            transferor_telegram_id=instance.telegram_id,
+        ).delete()

@@ -61,11 +61,6 @@ class CustomUserAdmin(admin.ModelAdmin):
         'role'
     ]
 
-    def save_model(self, request, obj, form, change):
-        if form.cleaned_data.get('password'):
-            obj.password = make_password(form.cleaned_data['password'])
-        obj.save()
-
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
