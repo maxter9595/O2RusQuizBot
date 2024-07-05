@@ -2,6 +2,7 @@ import os
 import time
 import random
 import re
+from itertools import groupby
 
 import django
 import telebot
@@ -20,6 +21,36 @@ from quiz.settings import BOT_TOKEN
 from tgbot.models import Authorization, CustomUser, PointsTransaction, Question, Tournament, PointsTournament, Standings
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
+
+def update_standings_places():
+    """
+    Обновляет места в турнирной таблице
+    """
+    standings_list = Standings.objects.order_by('-tournament_points')
+    quiz_standings_list = Standings.objects.order_by('-quiz_points')
+    total_standings_list = Standings.objects.order_by('-total_points', 'full_name')
+
+    for index, standings_group in enumerate(
+            groupby(standings_list, key=lambda x: x.tournament_points), start=1
+    ):
+        for standings in standings_group[1]:
+            standings.tournament_place = index
+            standings.save()
+
+    for index, quiz_standings_group in enumerate(
+            groupby(quiz_standings_list, key=lambda x: x.quiz_points), start=1
+    ):
+        for quiz_standings in quiz_standings_group[1]:
+            quiz_standings.quiz_place = index
+            quiz_standings.save()
+
+    for index, total_standings_group in enumerate(
+            groupby(total_standings_list, key=lambda x: (x.total_points, x.full_name)), start=1
+    ):
+        for total_standings in total_standings_group[1]:
+            total_standings.final_place = index
+            total_standings.save()
 
 
 def update_tournament_points(telegram_id):
@@ -92,6 +123,7 @@ def update_tournament_points(telegram_id):
             standing_participant.update(
                 total_points=standing_participant.first().quiz_points + standing_participant.first().tournament_points
             )
+            update_standings_places()
 
 
 def update_quiz_points(telegram_id):
@@ -164,6 +196,7 @@ def update_quiz_points(telegram_id):
             standing_participant.update(
                 total_points=standing_participant.first().quiz_points + standing_participant.first().tournament_points
             )
+            update_standings_places()
 
 
 @bot.message_handler(commands=['start'])
@@ -343,11 +376,22 @@ def process_password_registration(message, full_name, date_of_birth, phone_numbe
             role_id=3
         )
 
+        standings_entry = Standings.objects.filter(
+            participant_telegram=auth_user,
+            full_name=auth_user.full_name
+        )
+
         CustomUser.objects.filter(
             username_id=auth_user.id
         ).update(
             password=hashed_password
         )
+
+        if not standings_entry.exists():
+            Standings.objects.create(
+                participant_telegram=auth_user,
+                full_name=auth_user.full_name
+            )
 
         bot.reply_to(
             message=message,

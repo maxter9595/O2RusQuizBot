@@ -1,7 +1,7 @@
 import re
 from itertools import groupby
 
-from django.db import models
+from django.db import models, transaction
 from django.apps import apps
 from django.db.models import Sum
 from django.utils import timezone
@@ -340,7 +340,8 @@ class Question(models.Model):
     )
     image = models.ImageField(
         null=True,
-        upload_to='questions_images/'
+        upload_to='questions_images/',
+        blank = True
     )
 
     def __str__(self):
@@ -563,32 +564,41 @@ def delete_point_records(sender, instance, **kwargs):
 
 class Standings(models.Model):
     """
-    participant_telegram
+    Выполняет роль общей турнирной таблицы
+    participant_telegram - Telegram ID участника
+    full_name - ФИО участника
+    total_points - общее количество баллов участника
+    final_place - место участника в зависимости от total_points
+    tournament_points - количество баллов участника за турнир
+    tournament_place - место участника в зависимости от tournament_points
+    quiz_points - количество баллов участника за викторину
+    quiz_place - место участника в зависимости от quiz_points
     """
-    participant_telegram = models.CharField(
-        null=False,
-        unique=True,
-        max_length=100
+    participant_telegram = models.ForeignKey(
+        'Authorization',
+        related_name='participant_telegram',
+        on_delete=models.CASCADE,
+        to_field='telegram_id'
     )
     full_name = models.CharField(
         max_length=100,
-        null=False
+        null=True
     )
     total_points = models.IntegerField(
         default=0,
-        null=False
+        null=True
     )
     final_place = models.IntegerField(
         default=0,
-        null=False
+        null=True
     )
     tournament_points = models.IntegerField(
         default=0,
-        null=False
+        null=True
     )
     tournament_place = models.IntegerField(
         default=0,
-        null=False
+        null=True
     )
     quiz_points = models.IntegerField(
         default=0,
@@ -596,36 +606,8 @@ class Standings(models.Model):
     )
     quiz_place = models.IntegerField(
         default=0,
-        null=False
+        null=True
     )
-
-    def save(self, *args, **kwargs):
-        if 'tournament_place' in kwargs.get('update_fields', []):
-            super(Standings, self).save(*args, **kwargs)
-
-        else:
-            standings_list = Standings.objects.order_by('-tournament_points')
-            quiz_standings_list = Standings.objects.order_by('-quiz_points')
-            total_standings_list = Standings.objects.order_by('-total_points', 'full_name')
-
-            for index, standings_group in enumerate(groupby(standings_list, key=lambda x: x.tournament_points),
-                                                    start=1):
-                for standings in standings_group[1]:
-                    standings.tournament_place = index
-
-            for index, quiz_standings_group in enumerate(groupby(quiz_standings_list, key=lambda x: x.quiz_points),
-                                                         start=1):
-                for quiz_standings in quiz_standings_group[1]:
-                    quiz_standings.quiz_place = index
-
-            for index, total_standings_group in enumerate(
-                    groupby(total_standings_list, key=lambda x: (x.total_points, x.full_name)), start=1):
-                for total_standings in total_standings_group[1]:
-                    total_standings.final_place = index
-
-            Standings.objects.bulk_update(standings_list, ['tournament_place'])
-            Standings.objects.bulk_update(quiz_standings_list, ['quiz_place'])
-            Standings.objects.bulk_update(total_standings_list, ['final_place'])
 
     class Meta:
         ordering = ['-total_points', 'full_name']
@@ -635,58 +617,28 @@ class Standings(models.Model):
 
 
 @receiver(post_save, sender=Authorization)
-def get_users(sender, instance, created, **kwargs):
-    """"
-    Добавялет пользователя после его регистрации
+def create_standings_entry(sender, instance, created, **kwargs):
+    """
+    Создает запись в Standings при создании нового участника
     """
     if created:
-        user = Standings.objects.filter(
-            participant_telegram=instance.telegram_id,
+        print('Создается запись в Standings')
+        standings_entry = Standings.objects.create(
+            participant_telegram=instance,
+            full_name=instance.full_name
         )
-
-        if not user.exists():
-            new_user = Standings()
-            new_user.participant_telegram_id = instance.telegram_id
-            new_user.full_name = instance.full_name
-            new_user.save()
+        if standings_entry:
+            print('Запись в Standings успешно создана')
+        else:
+            print('Не удалось создать запись в Standings')
 
 
-# @receiver(post_save, sender=Standings)
-# def check_standings_table(sender, instance, **kwargs):
-#     """"
-#     Проверяет по Telegram ID отсутствие пользователя в PointsTransaction и PointsTournament
-#     """
-#     sender_quiz = PointsTransaction.objects.filter(
-#         sender_telegram_id=instance.participant_telegram
-#     )
-#
-#     receiver_quiz = PointsTransaction.objects.filter(
-#         receiver_telegram_id=instance.participant_telegram
-#     )
-#
-#     if not sender_quiz.exists() and not receiver_quiz.exists():
-#         instance.quiz_points = 0
-#         instance.save()
-#
-#     sender_tournament = PointsTournament.objects.filter(
-#         sender_telegram_id=instance.participant_telegram,
-#     )
-#
-#     receiver_tournament = PointsTournament.objects.filter(
-#         receiver_telegram_id=instance.participant_telegram
-#     )
-#
-#     if not sender_tournament.exists() and not receiver_tournament.exists():
-#         instance.tournament_points = 0
-#         instance.save()
-
-
-# @receiver(post_save, sender=Authorization)
-# def delete_point_records(sender, instance, **kwargs):
-#     """"
-#     Удаляет баллы пользователя после изменения его роли на "Директора" или "Админа"
-#     """
-#     if instance and instance.role.id != 3:
-#         Standings.objects.filter(
-#             participant_telegram=instance,
-#         ).delete()
+@receiver(post_save, sender=Authorization)
+def delete_point_records(sender, instance, **kwargs):
+    """"
+    Удаляет пользователя из Authorization после изменения его роли на "Директора" или "Админа"
+    """
+    if instance and instance.role.id != 3:
+        Standings.objects.filter(
+            participant_telegram=instance,
+        ).delete()
