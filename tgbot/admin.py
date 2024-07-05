@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.hashers import make_password
 
-from tgbot.models import Role, Authorization, CustomUser, Question
+from tgbot.models import Role, Authorization, CustomUser, Question, Tournament
 
 
 @admin.register(Role)
@@ -61,6 +61,14 @@ class CustomUserAdmin(admin.ModelAdmin):
         'role'
     ]
 
+    def save_model(self, request, obj, form, change):
+        password = form.cleaned_data.get('password')
+
+        if password:
+            if 'pbkdf2' not in password:
+                obj.password = make_password(form.cleaned_data['password'])
+            obj.save()
+
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
@@ -81,3 +89,22 @@ class QuestionAdmin(admin.ModelAdmin):
         'question_text'
     ]
     list_per_page = 20
+
+
+@admin.register(Tournament)
+class TournamentAdmin(admin.ModelAdmin):
+    """"
+    Настраивает админку для модели Tournament
+    """
+    list_display = [
+        'id',
+        'tournament_name',
+        'description',
+    ]
+    list_filter = [
+        'id'
+    ]
+    search_fields = [
+        'tournament_name',
+        'description',
+    ]

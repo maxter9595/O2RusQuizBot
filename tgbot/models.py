@@ -1,7 +1,9 @@
 import re
+from itertools import groupby
 
 from django.db import models
 from django.apps import apps
+from django.db.models import Sum
 from django.utils import timezone
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
@@ -347,7 +349,7 @@ class Question(models.Model):
 
 class PointsTransaction(models.Model):
     """"
-    Содержит данные о начисленных и списанных баллах
+    Содержит данные о начисленных и списанных баллах в рамках викторины
     points_datetime - дата и время начисления или списания баллов
     tournament_points - количество баллов, начисленных по 1-му типу (порядковый номер занятого места с шагом 5 баллов)
     points_received_or_transferred - количество баллов, начисленных по 2-му типу (РОТ/ПОТ)
@@ -358,8 +360,6 @@ class PointsTransaction(models.Model):
     receiver_telegram - Telegram ID получателя баллов по 4-му типу (перекидывание баллов от одного участника к другому)
     transferor_telegram -  Telegram ID директора, ответственного за перекидывание баллов по 4-му типу
     question - ID вопроса из таблицы Question
-    is_answered - статус отвечен вопрос корректно или нет (1 - ответ верный, 0 - дан неверный ответ)
-    is_done - столбец для пометки пройден ли вопрос участником или нет (0 - участник дал ответ на вопрос, 1 - наоборот)
     """
     points_datetime = models.DateTimeField(
         null=False,
@@ -379,7 +379,7 @@ class PointsTransaction(models.Model):
     )
     sender_telegram = models.ForeignKey(
         'Authorization',
-        related_name='sender_transactions',
+        related_name='sender_transactions1',
         on_delete=models.CASCADE,
         to_field='telegram_id'
     )
@@ -388,14 +388,14 @@ class PointsTransaction(models.Model):
     )
     receiver_telegram = models.ForeignKey(
         'Authorization',
-        related_name='receiver_transactions',
+        related_name='receiver_transactions1',
         on_delete=models.CASCADE,
         null=True,
         to_field='telegram_id'
     )
     transferor_telegram = models.ForeignKey(
         'Authorization',
-        related_name='transferor_transactions',
+        related_name='transferor_transactions1',
         on_delete=models.CASCADE,
         null=True,
         to_field='telegram_id'
@@ -433,7 +433,9 @@ def update_transfer_datetime(sender, instance, **kwargs):
 
 @receiver(pre_save, sender=Authorization)
 def delete_point_records(sender, instance, **kwargs):
-
+    """"
+    Удаляет баллы пользователя после изменения его роли на "Директора" или "Админа"
+    """
     if instance.role_id != 3:
         PointsTransaction.objects.filter(
             sender_telegram_id=instance.telegram_id,
@@ -447,3 +449,244 @@ def delete_point_records(sender, instance, **kwargs):
         PointsTransaction.objects.filter(
             transferor_telegram_id=instance.telegram_id,
         ).delete()
+
+
+class Tournament(models.Model):
+    tournament_name = models.CharField(
+        max_length=150,
+        null=False
+    )
+    description = models.TextField(
+        null=True,
+        max_length=1500
+    )
+
+
+class PointsTournament(models.Model):
+    """"
+    Содержит данные о начисленных и списанных баллах в рамках турнира
+    points_datetime - дата и время начисления или списания баллов
+    tournament_points - количество баллов, начисленных по 1-му типу (порядковый номер занятого места с шагом 5 баллов)
+    points_received_or_transferred - количество баллов, начисленных по 2-му типу (РОТ/ПОТ)
+    bonuses - количество баллов, начисленных по 3-му типу (бонусы)
+    transfer_datetime - дата и время списания баллов (применим к 4-му типу начисления баллов)
+    sender_telegram - Telegram ID отправителя баллов по 4-му типу (перекидывание баллов от одного участника к другому)
+    points_transferred - количество баллов, списанных по 4-му типу (перекидывание баллов от одного участника к другому)
+    receiver_telegram - Telegram ID получателя баллов по 4-му типу (перекидывание баллов от одного участника к другому)
+    transferor_telegram -  Telegram ID директора, ответственного за перекидывание баллов по 4-му типу
+    is_done - столбец для пометки пройден ли турнир участником или нет (0 - участник дал ответ на вопрос, 1 - наоборот)
+    tournament - номер турнира, связываемый с моделью Tournament
+    """
+    points_datetime = models.DateTimeField(
+        null=False,
+        auto_now_add=True
+    )
+    tournament_points = models.PositiveIntegerField(
+        null=True
+    )
+    points_received_or_transferred = models.PositiveIntegerField(
+        null=True
+    )
+    bonuses = models.PositiveIntegerField(
+        null=True
+    )
+    transfer_datetime = models.DateTimeField(
+        null=True
+    )
+    sender_telegram = models.ForeignKey(
+        'Authorization',
+        related_name='sender_transactions2',
+        on_delete=models.CASCADE,
+        to_field='telegram_id'
+    )
+    points_transferred = models.PositiveIntegerField(
+        null=True
+    )
+    receiver_telegram = models.ForeignKey(
+        'Authorization',
+        related_name='receiver_transactions2',
+        on_delete=models.CASCADE,
+        null=True,
+        to_field='telegram_id'
+    )
+    transferor_telegram = models.ForeignKey(
+        'Authorization',
+        related_name='transferor_transactions2',
+        on_delete=models.CASCADE,
+        null=True,
+        to_field='telegram_id'
+    )
+    is_done = models.BooleanField(
+        null=False,
+        default=False,
+        choices=[(True, 'Да'), (False, 'Нет')]
+    )
+    tournament = models.ForeignKey(
+        'Tournament',
+        related_name='tournament',
+        on_delete=models.CASCADE,
+        null=False,
+    )
+
+    def __str__(self):
+        return f'Transaction {self.id}'
+
+
+@receiver(pre_save, sender=PointsTournament)
+def update_transfer_datetime(sender, instance, **kwargs):
+    """"
+    Обновляет дату и время списания баллов при перекидывании баллов
+    """
+    if instance.points_transferred is not None:
+        instance.transfer_datetime = timezone.now()
+
+
+@receiver(pre_save, sender=Authorization)
+def delete_point_records(sender, instance, **kwargs):
+    """"
+    Удаляет баллы пользователя после изменения его роли на "Директора" или "Админа"
+    """
+    if instance.role_id != 3:
+        PointsTournament.objects.filter(
+            sender_telegram_id=instance.telegram_id,
+        ).delete()
+
+        PointsTournament.objects.filter(
+            receiver_telegram_id=instance.telegram_id,
+        ).delete()
+
+    elif instance.role_id != 2:
+        PointsTournament.objects.filter(
+            transferor_telegram_id=instance.telegram_id,
+        ).delete()
+
+
+class Standings(models.Model):
+    """
+    participant_telegram
+    """
+    participant_telegram = models.CharField(
+        null=False,
+        unique=True,
+        max_length=100
+    )
+    full_name = models.CharField(
+        max_length=100,
+        null=False
+    )
+    total_points = models.IntegerField(
+        default=0,
+        null=False
+    )
+    final_place = models.IntegerField(
+        default=0,
+        null=False
+    )
+    tournament_points = models.IntegerField(
+        default=0,
+        null=False
+    )
+    tournament_place = models.IntegerField(
+        default=0,
+        null=False
+    )
+    quiz_points = models.IntegerField(
+        default=0,
+        null=True
+    )
+    quiz_place = models.IntegerField(
+        default=0,
+        null=False
+    )
+
+    def save(self, *args, **kwargs):
+        if 'tournament_place' in kwargs.get('update_fields', []):
+            super(Standings, self).save(*args, **kwargs)
+
+        else:
+            standings_list = Standings.objects.order_by('-tournament_points')
+            quiz_standings_list = Standings.objects.order_by('-quiz_points')
+            total_standings_list = Standings.objects.order_by('-total_points', 'full_name')
+
+            for index, standings_group in enumerate(groupby(standings_list, key=lambda x: x.tournament_points),
+                                                    start=1):
+                for standings in standings_group[1]:
+                    standings.tournament_place = index
+
+            for index, quiz_standings_group in enumerate(groupby(quiz_standings_list, key=lambda x: x.quiz_points),
+                                                         start=1):
+                for quiz_standings in quiz_standings_group[1]:
+                    quiz_standings.quiz_place = index
+
+            for index, total_standings_group in enumerate(
+                    groupby(total_standings_list, key=lambda x: (x.total_points, x.full_name)), start=1):
+                for total_standings in total_standings_group[1]:
+                    total_standings.final_place = index
+
+            Standings.objects.bulk_update(standings_list, ['tournament_place'])
+            Standings.objects.bulk_update(quiz_standings_list, ['quiz_place'])
+            Standings.objects.bulk_update(total_standings_list, ['final_place'])
+
+    class Meta:
+        ordering = ['-total_points', 'full_name']
+
+    def __str__(self):
+        return self.full_name
+
+
+@receiver(post_save, sender=Authorization)
+def get_users(sender, instance, created, **kwargs):
+    """"
+    Добавялет пользователя после его регистрации
+    """
+    if created:
+        user = Standings.objects.filter(
+            participant_telegram=instance.telegram_id,
+        )
+
+        if not user.exists():
+            new_user = Standings()
+            new_user.participant_telegram_id = instance.telegram_id
+            new_user.full_name = instance.full_name
+            new_user.save()
+
+
+# @receiver(post_save, sender=Standings)
+# def check_standings_table(sender, instance, **kwargs):
+#     """"
+#     Проверяет по Telegram ID отсутствие пользователя в PointsTransaction и PointsTournament
+#     """
+#     sender_quiz = PointsTransaction.objects.filter(
+#         sender_telegram_id=instance.participant_telegram
+#     )
+#
+#     receiver_quiz = PointsTransaction.objects.filter(
+#         receiver_telegram_id=instance.participant_telegram
+#     )
+#
+#     if not sender_quiz.exists() and not receiver_quiz.exists():
+#         instance.quiz_points = 0
+#         instance.save()
+#
+#     sender_tournament = PointsTournament.objects.filter(
+#         sender_telegram_id=instance.participant_telegram,
+#     )
+#
+#     receiver_tournament = PointsTournament.objects.filter(
+#         receiver_telegram_id=instance.participant_telegram
+#     )
+#
+#     if not sender_tournament.exists() and not receiver_tournament.exists():
+#         instance.tournament_points = 0
+#         instance.save()
+
+
+# @receiver(post_save, sender=Authorization)
+# def delete_point_records(sender, instance, **kwargs):
+#     """"
+#     Удаляет баллы пользователя после изменения его роли на "Директора" или "Админа"
+#     """
+#     if instance and instance.role.id != 3:
+#         Standings.objects.filter(
+#             participant_telegram=instance,
+#         ).delete()
